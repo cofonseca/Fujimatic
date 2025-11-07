@@ -1,0 +1,2 @@
+# Session Manager - handles intervalometer, file naming, persistence
+# Manages capture sessions, state, and project metadata

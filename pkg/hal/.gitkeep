@@ -1,0 +1,2 @@
+# Hardware Abstraction Layer - Camera interface + real/fake implementations
+# Provides abstraction between SDK and application logic

@@ -1,0 +1,2 @@
+# SDK package - cgo bindings for Fujifilm Camera Control SDK
+# This package will contain Go-friendly wrappers for C functions
