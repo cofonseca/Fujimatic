@@ -12,16 +12,17 @@
 - **STORIES.md** contains all 13 user stories across 5 epics
 - Track progress with: 🔄 In Progress, ✅ Completed, ❌ Blocked, 📋 Not Started
 - When working on a story: check status, add notes, mark completion
-- Current progress: 2/13 stories completed (15%)
+- Current progress: 3/13 stories completed (23%)
+- **Epic A completed!** (Foundation & SDK Binding) - Go module, C wrapper, cgo bindings all implemented
 
 ## Architecture
 
 ### Components
-- **sdk-c-wrapper (C)** – Minimal API over the Fujifilm SDK
-- **pkg/sdk (Go)** – cgo bindings (not yet implemented)
+- **sdk-c-wrapper (C)** – Minimal API over the Fujifilm SDK (completed)
+- **pkg/sdk (Go)** – cgo bindings with Go-friendly wrappers (completed)
 - **pkg/hal** – Hardware abstraction layer (not yet implemented)
 - **pkg/session** – Session manager (not yet implemented)
-- **cmd/fujimatic** – CLI shell frontend (basic REPL implemented)
+- **cmd/fujimatic** – CLI shell frontend with SDK integration (enhanced)
 
 ### Data Flow
 User → CLI → Session Manager → HAL → SDK Wrapper → Fujifilm SDK → Camera
@@ -61,17 +62,28 @@ scripts/build_wrapper.sh
 
 ### Go Application Build
 
-**Current Status**: No go.mod exists yet, will need to be created.
+**Current Status**: Go module (go.mod) created, cgo bindings implemented.
 
-**Planned Command:**
+**Main Application Build:**
 ```cmd
 go build -o bin\fujimatic.exe ./cmd/fujimatic
 ```
+- Links with C wrapper library via cgo
+- Compiles all SDK package functions
 
 **Cross-compilation for ARM64:**
 ```bash
 GOARCH=arm64 GOOS=linux go build -o bin/fujimatic ./cmd/fujimatic
 ```
+
+### SDK Package Build
+
+**The SDK package (pkg/sdk) includes:**
+- CGO bindings for all C wrapper functions
+- Go-friendly error handling
+- Type-safe wrappers around C functions
+- Camera struct for session management
+- Integration tests in main program
 
 ### Environment Setup
 
@@ -127,6 +139,23 @@ All C functions return `int` status codes:
 - `fm_capture()` - Trigger capture
 - `fm_download_last(const char* outdir, const char* filename)` - Download last image
 
+### Go SDK Package
+**pkg/sdk** provides Go-friendly bindings with:
+- `InitResult` type for initialization results
+- `Camera` struct for connected camera sessions
+- Error handling with proper Go error types
+- Memory management for C string conversions
+- Type safety (int vs C.int, string vs C.CString)
+
+**Key Go Functions:**
+- `Init(sdkPath string) (InitResult, error)` - Initialize SDK
+- `Connect() (*Camera, error)` - Connect to camera
+- `(*Camera) Disconnect() error` - Disconnect camera
+- `(*Camera) GetBattery() (int, error)` - Get battery percentage
+- `(*Camera) SetShutter(seconds int) error` - Set shutter speed
+- `(*Camera) Capture() error` - Trigger capture
+- `(*Camera) DownloadLast(outputDir, filename string) error` - Download image
+
 ### Naming Conventions
 - **Project**: lowercase with underscores (`fujimatic`)
 - **C Functions**: `fm_*` prefix (fm_init, fm_connect, etc.)
@@ -171,7 +200,9 @@ viewer_cmd: "mpv"
 3. **Cross-compilation**: ARM64 builds need `GOARCH=arm64 GOOS=linux`
 4. **File Paths**: Windows uses backslashes, Linux uses forward slashes
 5. **SDK Licensing**: Redistributables not committed to repo, must be obtained separately
-6. **Current State**: Most functionality is mocked/stubbed, not yet functional
+6. **CGO Build Tags**: Package requires proper cgo compilation, watch for build constraint issues
+7. **Memory Management**: C strings must be properly converted and freed to prevent memory leaks
+8. **Current State**: CGO bindings implemented, still using mocked C functions for testing
 
 ## Next Development Steps
 
