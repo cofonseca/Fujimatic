@@ -1,0 +1,72 @@
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Fujimatic specific
+libs/
+# Ignore compiled C libraries
+libs/windows/*.dll
+libs/linux/*.so
+libs/macOS/*.dylib
+!libs/windows/.gitkeep
+!libs/linux/.gitkeep
+!libs/macOS/.gitkeep
+
+# SDK redistributables (too large/binary to commit)
+sdk/REDISTRIBUTABLES/Windows/
+sdk/REDISTRIBUTABLES/Linux/
+sdk/REDISTRIBUTABLES/macOS/
+sdk/REDISTRIBUTABLES/Android/
+!sdk/REDISTRIBUTABLES/Windows/.gitkeep
+!sdk/REDISTRIBUTABLES/Linux/.gitkeep
+!sdk/REDISTRIBUTABLES/macOS/.gitkeep
+!sdk/REDISTRIBUTABLES/Android/.gitkeep
+
+# Session and config files
+*.json
+*.yaml
+*.yml
+!README.md
+!CRUSH.md
+
+# Build artifacts
+*.o
+*.a
+*.lib
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
