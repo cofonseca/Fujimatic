@@ -4,7 +4,15 @@
 
 **fujimatic** is an interactive CLI/TUI for tethered control of Fujifilm mirrorless cameras (initial focus: X-T3) to support film scanning and astrophotography workflows. Written in Go with a small C wrapper for the Fujifilm Camera Control SDK.
 
-**Current Status**: Early prototype stage - most functionality is stub/mock implementations.
+**Current Status**: Early prototype stage - following Scrum user stories. See STORIES.md for current progress.
+
+## Development Process
+
+### User Story Management
+- **STORIES.md** contains all 13 user stories across 5 epics
+- Track progress with: 🔄 In Progress, ✅ Completed, ❌ Blocked, 📋 Not Started
+- When working on a story: check status, add notes, mark completion
+- Current progress: 2/13 stories completed (15%)
 
 ## Architecture
 
