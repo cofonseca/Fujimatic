@@ -70,3 +70,5 @@ sdk/REDISTRIBUTABLES/Android/
 *.temp
 tmp/
 temp/
+
+*.pdf

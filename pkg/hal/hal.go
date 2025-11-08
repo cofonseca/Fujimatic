@@ -1,0 +1,68 @@
+package hal
+
+import (
+	"fmt"
+)
+
+// Camera interface abstracts all camera operations
+type Camera interface {
+	// Connect establishes a connection to the camera
+	Connect() error
+
+	// Disconnect closes the connection to the camera
+	Disconnect() error
+
+	// IsConnected returns true if the camera is currently connected
+	IsConnected() bool
+
+	// GetBattery returns the current battery percentage
+	GetBattery() (int, error)
+
+	// SetShutter sets the shutter speed in seconds
+	SetShutter(seconds int) error
+
+	// Capture triggers a photo capture
+	Capture() error
+
+	// DownloadLast downloads the last captured image to the specified location
+	DownloadLast(outputDir, filename string) error
+}
+
+// InitResult represents the result of SDK initialization
+type InitResult int
+
+const (
+	InitSuccess InitResult = iota
+	InitError
+)
+
+func (r InitResult) String() string {
+	switch r {
+	case InitSuccess:
+		return "Success"
+	case InitError:
+		return "Error"
+	default:
+		return "Unknown"
+	}
+}
+
+// HAL interface for camera system initialization
+type HAL interface {
+	// Initialize initializes the camera system
+	Initialize(sdkPath string) (InitResult, error)
+
+	// NewCamera creates a new camera instance
+	NewCamera() Camera
+}
+
+// InitializeSDK initializes the Fujifilm SDK
+func InitializeSDK(sdkPath string) (InitResult, error) {
+	if sdkPath == "" {
+		return InitError, fmt.Errorf("SDK path cannot be empty")
+	}
+
+	// This will be implemented to use the real SDK or fake SDK
+	// based on the current configuration
+	return InitSuccess, nil
+}
