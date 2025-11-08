@@ -43,22 +43,17 @@ libs/macOS/*.dylib
 !libs/linux/.gitkeep
 !libs/macOS/.gitkeep
 
-# SDK redistributables (too large/binary to commit)
-sdk/REDISTRIBUTABLES/Windows/
-sdk/REDISTRIBUTABLES/Linux/
-sdk/REDISTRIBUTABLES/macOS/
-sdk/REDISTRIBUTABLES/Android/
-!sdk/REDISTRIBUTABLES/Windows/.gitkeep
-!sdk/REDISTRIBUTABLES/Linux/.gitkeep
-!sdk/REDISTRIBUTABLES/macOS/.gitkeep
-!sdk/REDISTRIBUTABLES/Android/.gitkeep
+# Entire SDK directory (proprietary content)
+sdk/
 
 # Session and config files
 *.json
 *.yaml
 *.yml
 !README.md
-!CRUSH.md
+# Ignore all other markdown files (keep README.md only)
+*.md
+!STORIES.md
 
 # Build artifacts
 *.o
@@ -71,5 +66,16 @@ sdk/REDISTRIBUTABLES/Android/
 tmp/
 temp/
 
+# PDFs (SDK documentation)
 *.pdf
+
+# RAW image files
 *.RAF
+
+# Test data and development files
+test_*
+*_PROGRESS.md
+*_test.*
+
+# AI/Claude specific files
+.claude/

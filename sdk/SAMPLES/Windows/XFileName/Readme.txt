@@ -1,1 +1,0 @@
-See the section 7.1 XFileName in the API Reference document in detail.
