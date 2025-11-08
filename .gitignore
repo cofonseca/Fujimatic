@@ -50,10 +50,8 @@ sdk/
 *.json
 *.yaml
 *.yml
-!README.md
 # Ignore all other markdown files (keep README.md only)
 *.md
-!STORIES.md
 
 # Build artifacts
 *.o

@@ -146,7 +146,12 @@ func (s *Shell) cmdHelp() error {
 	fmt.Println("  battery              - Show battery level")
 	fmt.Println("  get <iso|shutter>    - Get current camera setting")
 	fmt.Println("  set <iso|shutter> <value> - Set camera setting")
-	fmt.Println("                         (shutter: 0.000125s to 3600s, e.g. '0.125s' or '2s')")
+	fmt.Println("                         Shutter speeds (photographer-friendly):")
+	fmt.Println("                         - Fractions: 1/30, 1/125, 1/250, 1/500, 1/1000, 1/2000, 1/4000")
+	fmt.Println("                         - Decimals: 0.5, 1, 2, 4, 30 (in seconds)")
+	fmt.Println("                         - Optional 's' suffix: 1/125s, 0.5s, 2s")
+	fmt.Println("                         - Range: 1/8000s to 3600s (1 hour)")
+	fmt.Println("                         - Auto-validates against camera's supported speeds")
 	fmt.Println("  shutters              - List available shutter speeds (diagnostic)")
 	fmt.Println("                         (Camera set to Manual exposure mode automatically)")
 	fmt.Println()
@@ -399,7 +404,12 @@ func (s *Shell) cmdGet(args []string) error {
 		}
 		// Convert microseconds to seconds for display
 		seconds := float64(shutter) / 1000000.0
-		fmt.Printf("Current shutter: %.6f seconds (%d microseconds)\n", seconds, shutter)
+		fraction := getPhotographicFraction(seconds)
+		fmt.Printf("Current shutter: %.6f seconds (%d microseconds)", seconds, shutter)
+		if fraction != "" {
+			fmt.Printf(" = %s", fraction)
+		}
+		fmt.Println()
 
 	default:
 		return fmt.Errorf("unknown parameter: %s (use 'iso' or 'shutter')", param)
@@ -427,6 +437,14 @@ func (s *Shell) cmdSet(args []string) error {
 			return fmt.Errorf("invalid ISO value: %w", err)
 		}
 
+		// CRITICAL: Ensure camera is in Manual exposure mode for ISO control
+		// Some cameras reject manual settings if still in auto mode
+		fmt.Println("Setting camera to Manual exposure mode...")
+		if err := s.camera.SetExposureMode(0x0001); err != nil {
+			return fmt.Errorf("failed to set Manual exposure mode: %w", err)
+		}
+		fmt.Println("✅ Manual exposure mode set - full shutter/ISO control available")
+
 		if err := s.camera.SetISO(isoValue); err != nil {
 			return fmt.Errorf("failed to set ISO: %w", err)
 		}
@@ -439,14 +457,50 @@ func (s *Shell) cmdSet(args []string) error {
 			return fmt.Errorf("invalid shutter value: %w", err)
 		}
 
-		// Convert seconds to microseconds for camera
-		shutterMicroseconds := int(shutterSeconds * 1000000)
+		// CRITICAL: Ensure camera is in Manual exposure mode for shutter control
+		// Some cameras reject manual settings if still in auto mode
+		fmt.Println("Setting camera to Manual exposure mode...")
+		if err := s.camera.SetExposureMode(0x0001); err != nil {
+			return fmt.Errorf("failed to set Manual exposure mode: %w", err)
+		}
+		fmt.Println("✅ Manual exposure mode set - full shutter/ISO control available")
 
-		if err := s.camera.SetShutter(shutterMicroseconds); err != nil {
+		// Get the list of supported shutter speeds from the camera
+		supportedSpeeds, err := s.camera.GetSupportedShutterSpeeds()
+		if err != nil {
+			return fmt.Errorf("failed to get supported shutter speeds: %w", err)
+		}
+
+		if len(supportedSpeeds) == 0 {
+			return fmt.Errorf("no supported shutter speeds found - camera may not be in Manual mode")
+		}
+
+		// Convert requested seconds to microseconds
+		requestedMicroseconds := int(shutterSeconds * 1000000)
+		fmt.Printf("Requested: %.6f seconds (%d microseconds)\n", shutterSeconds, requestedMicroseconds)
+
+		// Find the closest supported shutter speed
+		closestSpeed := findClosestShutterSpeed(requestedMicroseconds, supportedSpeeds)
+		fmt.Printf("Using closest supported speed: %d microseconds (%.6f seconds)", closestSpeed, float64(closestSpeed)/1000000.0)
+
+		actualFraction := getPhotographicFraction(float64(closestSpeed) / 1000000.0)
+		if actualFraction != "" {
+			fmt.Printf(" = %s", actualFraction)
+		}
+		fmt.Println()
+
+		if err := s.camera.SetShutter(closestSpeed); err != nil {
 			return fmt.Errorf("failed to set shutter: %w", err)
 		}
 
-		fmt.Printf("Shutter set to: %.6f seconds (%d microseconds)\n", shutterSeconds, shutterMicroseconds)
+		// Display result confirmation
+		actualSeconds := float64(closestSpeed) / 1000000.0
+		actualDisplayFraction := getPhotographicFraction(actualSeconds)
+		fmt.Printf("Shutter set to: %.6f seconds (%d microseconds)", actualSeconds, closestSpeed)
+		if actualDisplayFraction != "" {
+			fmt.Printf(" = %s", actualDisplayFraction)
+		}
+		fmt.Println()
 
 	default:
 		return fmt.Errorf("unknown parameter: %s (use 'iso' or 'shutter')", param)
@@ -516,16 +570,100 @@ func parseDuration(s string) (int64, error) {
 	return microseconds, nil
 }
 
+// findClosestShutterSpeed finds the closest supported shutter speed to the requested value
+func findClosestShutterSpeed(requested int, supported []int) int {
+	if len(supported) == 0 {
+		return requested
+	}
+
+	closest := supported[0]
+	minDiff := absInt(requested - closest)
+
+	for _, speed := range supported {
+		diff := absInt(requested - speed)
+		if diff < minDiff {
+			minDiff = diff
+			closest = speed
+		}
+	}
+
+	return closest
+}
+
+func absInt(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// getPhotographicFraction converts decimal seconds to a photographic fraction string
+// e.g., 0.03125 -> "1/32s", 0.125 -> "1/8s", 0.5 -> "1/2s", 2.0 -> "2s"
+func getPhotographicFraction(seconds float64) string {
+	if seconds <= 0 {
+		return ""
+	}
+
+	// If it's 1 second or less, express as 1/x
+	if seconds <= 1.0 {
+		denominator := 1.0 / seconds
+		// Round to nearest integer
+		rounded := int(denominator + 0.5)
+		return fmt.Sprintf("1/%ds", rounded)
+	} else {
+		// Whole seconds
+		return fmt.Sprintf("%.0fs", seconds)
+	}
+}
+
 func parseShutterDuration(s string) (float64, error) {
 	// Parse shutter duration and return as seconds (float64)
-	// Handle optional 's' suffix (e.g., "0.5s" -> "0.5")
+	// Supports both decimal and fraction formats:
+	// - "0.5s" or "0.5" (decimal seconds)
+	// - "1/30s" or "1/30" (photographic fractions)
+	// - "1/4s" or "1/4" (fractional seconds)
+
+	// Handle optional 's' suffix
 	if strings.HasSuffix(s, "s") {
 		s = s[:len(s)-1]
 	}
 
-	seconds, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return 0, fmt.Errorf("invalid shutter duration: %s", s)
+	var seconds float64
+	var err error
+
+	// Check if this is a fraction format (contains '/')
+	if strings.Contains(s, "/") {
+		// Parse as fraction (e.g., "1/30" -> 1/30 = 0.0333...)
+		parts := strings.Split(s, "/")
+		if len(parts) != 2 {
+			return 0, fmt.Errorf("invalid shutter duration format: %s", s)
+		}
+
+		// Parse numerator and denominator
+		var numerator, denominator float64
+		numerator, err = strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid fraction numerator: %s", parts[0])
+		}
+
+		denominator, err = strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid fraction denominator: %s", parts[1])
+		}
+
+		// Validate denominator
+		if denominator <= 0 {
+			return 0, fmt.Errorf("fraction denominator must be positive: %s", s)
+		}
+
+		// Calculate fraction value
+		seconds = numerator / denominator
+	} else {
+		// Parse as decimal (e.g., "0.5" -> 0.5 seconds)
+		seconds, err = strconv.ParseFloat(s, 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid shutter duration: %s", s)
+		}
 	}
 
 	if seconds < 0 {
@@ -549,6 +687,14 @@ func (s *Shell) cmdListShutterSpeeds() error {
 		return fmt.Errorf("camera not connected - use 'connect' first")
 	}
 
+	// Ensure we're in Manual mode first
+	fmt.Println("Setting camera to Manual exposure mode...")
+	if err := s.camera.SetExposureMode(0x0001); err != nil {
+		return fmt.Errorf("failed to set Manual exposure mode: %w", err)
+	}
+	fmt.Println("✅ Manual exposure mode set")
+
+	// List shutter speeds using the existing diagnostic function
 	if err := s.camera.ListShutterSpeeds(); err != nil {
 		return fmt.Errorf("failed to list shutter speeds: %w", err)
 	}

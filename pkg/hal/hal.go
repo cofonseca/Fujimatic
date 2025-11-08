@@ -39,6 +39,9 @@ type Camera interface {
 	// SetISO sets the ISO sensitivity value
 	SetISO(iso int) error
 
+	// GetSupportedShutterSpeeds returns the list of supported shutter speeds in microseconds
+	GetSupportedShutterSpeeds() ([]int, error)
+
 	// Capture triggers a photo capture
 	Capture() error
 

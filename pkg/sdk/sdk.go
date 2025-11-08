@@ -147,6 +147,39 @@ func (c *Camera) ListShutterSpeeds() error {
 	return fmt.Errorf("failed to list shutter speeds, code: %d", result)
 }
 
+// GetSupportedShutterSpeeds returns the list of supported shutter speeds in microseconds
+func (c *Camera) GetSupportedShutterSpeeds() ([]int, error) {
+	if !c.connected {
+		return nil, fmt.Errorf("camera not connected")
+	}
+
+	// First get the count
+	var count C.int
+	result := C.fm_get_supported_shutter_count(&count)
+	if result != 0 {
+		return nil, fmt.Errorf("failed to get shutter speed count, code: %d", result)
+	}
+
+	if count == 0 {
+		return nil, fmt.Errorf("no supported shutter speeds found - ensure camera is in Manual mode")
+	}
+
+	// Allocate array for the speeds
+	speeds := make([]C.int, int(count))
+	result = C.fm_get_supported_shutter_speeds(&count, &speeds[0])
+	if result != 0 {
+		return nil, fmt.Errorf("failed to get shutter speeds, code: %d", result)
+	}
+
+	// Convert to Go ints
+	goSpeeds := make([]int, int(count))
+	for i := 0; i < int(count); i++ {
+		goSpeeds[i] = int(speeds[i])
+	}
+
+	return goSpeeds, nil
+}
+
 // SetExposureMode sets the camera to Manual exposure mode
 // Only 0x0001 (Manual) is supported for tethered control
 func (c *Camera) SetExposureMode(mode int) error {

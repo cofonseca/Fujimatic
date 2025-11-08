@@ -204,6 +204,22 @@ func (r *RealCamera) SetISO(iso int) error {
 	return r.sdkCamera.SetISO(iso)
 }
 
+// GetSupportedShutterSpeeds returns the list of supported shutter speeds in microseconds
+func (r *RealCamera) GetSupportedShutterSpeeds() ([]int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.connected {
+		return nil, fmt.Errorf("camera not connected")
+	}
+
+	if r.sdkCamera == nil {
+		return nil, fmt.Errorf("SDK camera not initialized")
+	}
+
+	return r.sdkCamera.GetSupportedShutterSpeeds()
+}
+
 // Capture triggers a photo capture
 func (r *RealCamera) Capture() error {
 	r.mu.Lock()

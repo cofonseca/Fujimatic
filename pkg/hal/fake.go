@@ -189,6 +189,36 @@ func (f *FakeCamera) SetISO(iso int) error {
 	return nil
 }
 
+// GetSupportedShutterSpeeds returns the list of supported shutter speeds in microseconds
+func (f *FakeCamera) GetSupportedShutterSpeeds() ([]int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.connected {
+		return nil, fmt.Errorf("camera not connected")
+	}
+
+	// Return common shutter speeds for fake camera testing
+	return []int{
+		125,    // 1/8000s
+		250,    // 1/4000s
+		500,    // 1/2000s
+		1000,   // 1/1000s
+		2000,   // 1/500s
+		4000,   // 1/250s
+		8000,   // 1/125s
+		15625,  // 1/64s
+		31250,  // 1/32s
+		62500,  // 1/16s
+		125000, // 1/8s
+		250000, // 1/4s
+		500000, // 1/2s
+		1000000, // 1s
+		2000000, // 2s
+		4000000, // 4s
+	}, nil
+}
+
 // Capture triggers a photo capture
 func (f *FakeCamera) Capture() error {
 	f.mu.Lock()

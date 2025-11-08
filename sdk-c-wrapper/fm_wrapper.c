@@ -604,3 +604,93 @@ int fm_download_last(const char* outdir, const char* filename) {
     printf("Downloaded image: %s (%ld bytes)\n", filepath, img_info.lDataSize);
     return 0;
 }
+
+int fm_get_supported_shutter_count(int* count) {
+    if (g_hCamera == NULL) {
+        fprintf(stderr, "fm_get_supported_shutter_count: Camera not connected\n");
+        return -1;
+    }
+
+    if (count == NULL) {
+        fprintf(stderr, "fm_get_supported_shutter_count: count pointer is NULL\n");
+        return -2;
+    }
+
+    printf("Getting supported shutter speed count...\n");
+    long num_speeds = 0;
+    long bulb_capable = 0;
+    long result = XSDK_CapShutterSpeed(g_hCamera, &num_speeds, NULL, &bulb_capable);
+    if (result != 0) {
+        fprintf(stderr, "fm_get_supported_shutter_count: XSDK_CapShutterSpeed failed with code: %ld\n", result);
+        return -3;
+    }
+
+    *count = (int)num_speeds;
+    printf("Camera supports %ld shutter speeds (bulb capable: %ld)\n", num_speeds, bulb_capable);
+
+    if (num_speeds == 0) {
+        fprintf(stderr, "WARNING: No supported shutter speeds found\n");
+        fprintf(stderr, "  This usually means the camera is not in Manual exposure mode\n");
+        fprintf(stderr, "  Try setting Manual mode first: XSDK_SetAEMode(hCamera, 0x0001)\n");
+    }
+
+    return 0;
+}
+
+int fm_get_supported_shutter_speeds(int* count, int* speeds) {
+    if (g_hCamera == NULL) {
+        fprintf(stderr, "fm_get_supported_shutter_speeds: Camera not connected\n");
+        return -1;
+    }
+
+    if (count == NULL || speeds == NULL) {
+        fprintf(stderr, "fm_get_supported_shutter_speeds: NULL parameters\n");
+        return -2;
+    }
+
+    long num_speeds = 0;
+    long bulb_capable = 0;
+
+    // First get the count
+    long result = XSDK_CapShutterSpeed(g_hCamera, &num_speeds, NULL, &bulb_capable);
+    if (result != 0) {
+        fprintf(stderr, "fm_get_supported_shutter_speeds: XSDK_CapShutterSpeed failed with code: %ld\n", result);
+        return -3;
+    }
+
+    if (num_speeds <= 0) {
+        fprintf(stderr, "fm_get_supported_shutter_speeds: No supported shutter speeds found\n");
+        *count = 0;
+        return -4;
+    }
+
+    // Allocate array for the speeds
+    long* valid_speeds = (long*)malloc(num_speeds * sizeof(long));
+    if (valid_speeds == NULL) {
+        fprintf(stderr, "fm_get_supported_shutter_speeds: Memory allocation failed\n");
+        return -5;
+    }
+
+    // Get the actual speeds
+    result = XSDK_CapShutterSpeed(g_hCamera, &num_speeds, valid_speeds, &bulb_capable);
+    if (result != 0) {
+        fprintf(stderr, "fm_get_supported_shutter_speeds: Failed to get shutter speed list: %ld\n", result);
+        free(valid_speeds);
+        return -6;
+    }
+
+    // Copy to output array
+    *count = (int)num_speeds;
+    for (long i = 0; i < num_speeds; i++) {
+        speeds[i] = (int)valid_speeds[i];
+    }
+
+    printf("Supported shutter speeds (%ld values):\n", num_speeds);
+    for (long i = 0; i < num_speeds; i++) {
+        double seconds = (double)valid_speeds[i] / 1000000.0;
+        printf("  %2ld: %7d μs (%.6f seconds)\n", i + 1, valid_speeds[i], seconds);
+    }
+
+    free(valid_speeds);
+    return 0;
+}
