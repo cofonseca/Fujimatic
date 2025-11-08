@@ -87,22 +87,22 @@ cp libs/windows/fmwrapper.dll bin/fmwrapper.dll
      - DC/DC_CHARGE=100% (AC powered)
    - Returns -1 (not connected), -2 (NULL pointer), -3 (SDK error)
 
-5. **fm_set_shutter()** - Shutter Speed Control
-   - Converts seconds to microseconds
-   - Calls XSDK_SetShutterSpeed() with bulb=0
-   - Returns -1 (not connected), -2 (negative value), -3 (SDK error)
-
-6. **fm_capture()** - Trigger Capture
+5. **fm_capture()** - Trigger Capture
    - Calls XSDK_Release() with release_mode=0
    - Returns -1 (not connected), -2 (SDK error)
 
-7. **fm_download_last()** - Image Download
+6. **fm_download_last()** - Image Download
    - Checks XSDK_GetBufferCapacity() for available images
    - Reads metadata with XSDK_ReadImageInfo()
    - Allocates buffer and downloads with XSDK_ReadImage()
    - Writes binary data to .RAF file
    - Deletes image from buffer with XSDK_DeleteImage()
    - Returns -1 to -9 for various error conditions
+
+7. **fm_set_shutter()** - Shutter Speed Control
+   - Converts seconds to microseconds
+   - Calls XSDK_SetShutterSpeed() with bulb=0
+   - Returns -1 (not connected), -2 (negative value), -3 (SDK error)
 
 **SDK Headers Used:**
 - `sdk/HEADERS/XAPI.H` - Main API declarations
@@ -170,7 +170,7 @@ go build -o bin/fujimatic.exe ./cmd/fujimatic
 
 **Camera Requirements:**
 - Power: Fully charged battery or AC adapter
-- Mode: Check if camera needs specific USB mode (MTP/PTP/PC Auto Save)
+- Mode: Camera should be in "USB AUTO" connection mode
 - Connection: USB 3.0/3.1 recommended for faster RAW transfer
 
 ### Test Sequence

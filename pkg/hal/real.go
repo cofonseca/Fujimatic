@@ -90,6 +90,22 @@ func (r *RealCamera) GetBattery() (int, error) {
 	return r.sdkCamera.GetBattery()
 }
 
+// GetShutter returns the current shutter speed in seconds
+func (r *RealCamera) GetShutter() (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.connected {
+		return 0, fmt.Errorf("camera not connected")
+	}
+
+	if r.sdkCamera == nil {
+		return 0, fmt.Errorf("SDK camera not initialized")
+	}
+
+	return r.sdkCamera.GetShutter()
+}
+
 // SetShutter sets the shutter speed in seconds
 func (r *RealCamera) SetShutter(seconds int) error {
 	r.mu.Lock()
@@ -104,6 +120,38 @@ func (r *RealCamera) SetShutter(seconds int) error {
 	}
 
 	return r.sdkCamera.SetShutter(seconds)
+}
+
+// GetISO returns the current ISO sensitivity value
+func (r *RealCamera) GetISO() (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.connected {
+		return 0, fmt.Errorf("camera not connected")
+	}
+
+	if r.sdkCamera == nil {
+		return 0, fmt.Errorf("SDK camera not initialized")
+	}
+
+	return r.sdkCamera.GetISO()
+}
+
+// SetISO sets the ISO sensitivity value
+func (r *RealCamera) SetISO(iso int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	if r.sdkCamera == nil {
+		return fmt.Errorf("SDK camera not initialized")
+	}
+
+	return r.sdkCamera.SetISO(iso)
 }
 
 // Capture triggers a photo capture

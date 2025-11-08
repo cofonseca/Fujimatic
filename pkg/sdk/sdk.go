@@ -98,6 +98,21 @@ func (c *Camera) GetBattery() (int, error) {
 	return 0, fmt.Errorf("failed to get battery level, code: %d", result)
 }
 
+// GetShutter returns the current shutter speed in seconds
+func (c *Camera) GetShutter() (int, error) {
+	if !c.connected {
+		return 0, fmt.Errorf("camera not connected")
+	}
+
+	var seconds C.int
+	result := C.fm_get_shutter(&seconds)
+
+	if result == 0 {
+		return int(seconds), nil
+	}
+	return 0, fmt.Errorf("failed to get shutter speed, code: %d", result)
+}
+
 // SetShutter sets the shutter speed in seconds
 func (c *Camera) SetShutter(seconds int) error {
 	if !c.connected {
@@ -113,6 +128,38 @@ func (c *Camera) SetShutter(seconds int) error {
 		return nil
 	}
 	return fmt.Errorf("failed to set shutter speed, code: %d", result)
+}
+
+// GetISO returns the current ISO sensitivity value
+func (c *Camera) GetISO() (int, error) {
+	if !c.connected {
+		return 0, fmt.Errorf("camera not connected")
+	}
+
+	var iso C.int
+	result := C.fm_get_iso(&iso)
+
+	if result == 0 {
+		return int(iso), nil
+	}
+	return 0, fmt.Errorf("failed to get ISO, code: %d", result)
+}
+
+// SetISO sets the ISO sensitivity value
+func (c *Camera) SetISO(iso int) error {
+	if !c.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	if iso < 100 || iso > 51200 {
+		return fmt.Errorf("ISO must be between 100 and 51200")
+	}
+
+	result := C.fm_set_iso(C.int(iso))
+	if result == 0 {
+		return nil
+	}
+	return fmt.Errorf("failed to set ISO, code: %d", result)
 }
 
 // Capture triggers a photo capture

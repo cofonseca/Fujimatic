@@ -182,9 +182,21 @@ int fm_disconnect() {
         return -1;
     }
 
-    long result = XSDK_Close(g_hCamera);
+    // CRITICAL: Restore camera to CAMERA priority mode before closing
+    // Without this, the camera stays in PC mode and reconnection fails
+    #define XSDK_PRIORITY_CAMERA 0x0001
+
+    printf("Restoring camera to CAMERA priority mode...\n");
+    long result = XSDK_SetPriorityMode(g_hCamera, XSDK_PRIORITY_CAMERA);
+    if (result != 0) {
+        fprintf(stderr, "fm_disconnect: Warning - failed to restore camera priority mode (code: %ld)\n", result);
+        // Continue with close anyway
+    }
+
+    result = XSDK_Close(g_hCamera);
     if (result != 0) {
         fprintf(stderr, "fm_disconnect: XSDK_Close failed with code: %ld\n", result);
+        g_hCamera = NULL;  // Clear handle even if close failed
         return -2;
     }
 
@@ -226,6 +238,34 @@ int fm_get_battery(int* percent) {
     return 0;
 }
 
+int fm_get_shutter(int* seconds) {
+    if (g_hCamera == NULL) {
+        fprintf(stderr, "fm_get_shutter: Camera not connected\n");
+        return -1;
+    }
+
+    if (seconds == NULL) {
+        fprintf(stderr, "fm_get_shutter: seconds pointer is NULL\n");
+        return -2;
+    }
+
+    // Get shutter speed from camera
+    long speed_microseconds = 0;
+    long bulb = 0;
+    long result = XSDK_GetShutterSpeed(g_hCamera, &speed_microseconds, &bulb);
+    if (result != 0) {
+        fprintf(stderr, "fm_get_shutter: XSDK_GetShutterSpeed failed with code: %ld\n", result);
+        return -3;
+    }
+
+    // Convert microseconds to seconds (round to nearest second)
+    *seconds = (int)((speed_microseconds + 500000) / 1000000);
+
+    printf("Current shutter speed: %d seconds (%ld microseconds, bulb=%ld)\n",
+           *seconds, speed_microseconds, bulb);
+    return 0;
+}
+
 int fm_set_shutter(int seconds) {
     if (g_hCamera == NULL) {
         fprintf(stderr, "fm_set_shutter: Camera not connected\n");
@@ -251,6 +291,51 @@ int fm_set_shutter(int seconds) {
     return 0;
 }
 
+int fm_get_iso(int* iso) {
+    if (g_hCamera == NULL) {
+        fprintf(stderr, "fm_get_iso: Camera not connected\n");
+        return -1;
+    }
+
+    if (iso == NULL) {
+        fprintf(stderr, "fm_get_iso: iso pointer is NULL\n");
+        return -2;
+    }
+
+    // Get ISO sensitivity from camera
+    long iso_value = 0;
+    long result = XSDK_GetSensitivity(g_hCamera, &iso_value);
+    if (result != 0) {
+        fprintf(stderr, "fm_get_iso: XSDK_GetSensitivity failed with code: %ld\n", result);
+        return -3;
+    }
+
+    *iso = (int)iso_value;
+    printf("Current ISO: %d\n", *iso);
+    return 0;
+}
+
+int fm_set_iso(int iso) {
+    if (g_hCamera == NULL) {
+        fprintf(stderr, "fm_set_iso: Camera not connected\n");
+        return -1;
+    }
+
+    if (iso < 100 || iso > 51200) {
+        fprintf(stderr, "fm_set_iso: Invalid ISO value (must be 100-51200)\n");
+        return -2;
+    }
+
+    long result = XSDK_SetSensitivity(g_hCamera, (long)iso);
+    if (result != 0) {
+        fprintf(stderr, "fm_set_iso: XSDK_SetSensitivity failed with code: %ld\n", result);
+        return -3;
+    }
+
+    printf("ISO set to %d\n", iso);
+    return 0;
+}
+
 int fm_capture() {
     if (g_hCamera == NULL) {
         fprintf(stderr, "fm_capture: Camera not connected\n");
@@ -258,15 +343,70 @@ int fm_capture() {
     }
 
     // Trigger capture using XSDK_Release
+    // Use XSDK_RELEASE_SHOOT_S1OFF mode - complete shutter sequence in one call
+    // From SDK manual: "Shutter button pressed all the way down and then released"
+    #define XSDK_RELEASE_SHOOT 0x0100
+    #define XSDK_RELEASE_N_S1OFF 0x0004
+    #define XSDK_RELEASE_SHOOT_S1OFF (XSDK_RELEASE_SHOOT | XSDK_RELEASE_N_S1OFF)
+    #define XSDK_COMPLETE 0
+
     long shot_opt = 0;
     long af_status = 0;
-    long result = XSDK_Release(g_hCamera, 0, &shot_opt, &af_status);
-    if (result != 0) {
-        fprintf(stderr, "fm_capture: XSDK_Release failed with code: %ld\n", result);
+    printf("Triggering shutter release (mode: 0x%04X)...\n", XSDK_RELEASE_SHOOT_S1OFF);
+    long result = XSDK_Release(g_hCamera, XSDK_RELEASE_SHOOT_S1OFF, &shot_opt, &af_status);
+
+    if (result != XSDK_COMPLETE) {
+        // Get detailed error information
+        long api_code = 0;
+        long err_code = 0;
+        XSDK_GetErrorNumber(g_hCamera, &api_code, &err_code);
+        fprintf(stderr, "fm_capture: XSDK_Release failed\n");
+        fprintf(stderr, "  Return code: %ld\n", result);
+        fprintf(stderr, "  API code: %ld (0x%04lX)\n", api_code, api_code);
+        fprintf(stderr, "  Error code: %ld (0x%04lX)\n", err_code, err_code);
+
+        // Common error codes
+        if (err_code == 0x8002) {
+            fprintf(stderr, "  -> Camera is BUSY (try again)\n");
+        } else if (err_code == 0x8003) {
+            fprintf(stderr, "  -> Invalid parameter\n");
+        } else if (err_code == 0x8004) {
+            fprintf(stderr, "  -> Not supported in this mode\n");
+        } else if (err_code == 0x8006) {
+            fprintf(stderr, "  -> Camera in wrong priority mode\n");
+        }
+
         return -2;
     }
 
-    printf("Capture triggered successfully\n");
+    printf("Capture triggered successfully (AF status: %ld, shot_opt: %ld)\n", af_status, shot_opt);
+
+    // Wait for image to appear in buffer
+    // SDK manual: "poll the camera buffer by XSDK_GetBufferCapacity() or XSDK_ReadImageInfo()"
+    long shoot_frames = 0;
+    long total_frames = 0;
+    int attempts = 0;
+
+    printf("Waiting for image to be written to camera buffer...\n");
+    while (attempts < 100) {  // Max 10 seconds
+        XSDK_GetBufferCapacity(g_hCamera, &shoot_frames, &total_frames);
+        if (shoot_frames > 0) {
+            printf("Image available in buffer after %d ms (%ld frames)\n", attempts * 100, shoot_frames);
+            break;  // Image is ready
+        }
+#ifdef _WIN32
+        Sleep(100);  // 100ms
+#else
+        usleep(100000);
+#endif
+        attempts++;
+    }
+
+    if (attempts >= 100) {
+        fprintf(stderr, "fm_capture: Warning - timeout waiting for image in buffer\n");
+        return -3;
+    }
+
     return 0;
 }
 

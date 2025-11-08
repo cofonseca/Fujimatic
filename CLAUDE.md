@@ -10,20 +10,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Architecture**: User → CLI → Session Manager → HAL (Hardware Abstraction Layer) → SDK Wrapper → Fujifilm SDK → Camera
 
-**Current Status**: Early development - Epic A and B completed (Foundation, SDK Binding, HAL, Session, CLI). Track progress in STORIES.md (6/13 stories completed). Currently working on Epic C (Hardware Integration & Real Camera).
+**Current Status**: Early development - Epic A and B completed (Foundation, SDK Binding, HAL, Session, CLI). Track progress in STORIES.md (7/13 stories completed). Currently working on Story C-2 (Full Capture & Download with Real Camera).
+
+## Development Workflow
+
+**CRITICAL RULE**: Never start working on a new story or feature without asking the user first. Always:
+1. Complete current documentation updates
+2. Ask the user what to work on next
+3. Wait for explicit approval before implementing new features
+4. Do not assume the next step - always confirm with the user
 
 ## MVP Scope
 
 The minimal viable product focuses on essential tethered shooting capabilities:
 
-1. **Camera Control**: Connect/disconnect via USB, set shutter speed, capture RAW (.RAF) images
+1. **Camera Control**: Connect/disconnect via USB, set iso and shutter speed, capture RAW (.RAF) images
 2. **Immediate Download**: Images downloaded synchronously to project directory (critical for plate-solving)
 3. **Intervalometer**: Start/pause/resume/stop with configurable delays and integration-time calculations
 4. **Battery Safety**: Monitor battery level, auto-pause at 10% threshold
 5. **Dual Modes**: Interactive shell (REPL) + `--non-interactive` for scripting
 6. **Configuration**: YAML config for defaults (output dir, battery threshold, SDK path)
 
-**Minimal API Philosophy**: Only 7 core functions in C wrapper (init, connect, disconnect, getBattery, setShutter, capture, downloadLast). Keep scope tight for MVP.
+**Minimal API Philosophy**: Only 10 core functions in C wrapper (init, connect, disconnect, getBattery, getShutter, setShutter, getISO, setISO, capture, downloadLast). Keep scope tight for MVP.
 
 ## Build Commands
 
@@ -133,7 +141,10 @@ All C functions return `int` status codes (0 = success):
 - `fm_connect()` - Connect to camera
 - `fm_disconnect()` - Disconnect camera
 - `fm_get_battery(int* percent)` - Get battery level
+- `fm_get_shutter(int* seconds)` - Get current shutter speed
 - `fm_set_shutter(int seconds)` - Set shutter speed
+- `fm_get_iso(int* iso)` - Get current ISO sensitivity
+- `fm_set_iso(int iso)` - Set ISO sensitivity (100-51200)
 - `fm_capture()` - Trigger capture
 - `fm_download_last(const char* outdir, const char* filename)` - Download image
 
@@ -147,7 +158,10 @@ type Camera interface {
     Disconnect() error
     IsConnected() bool
     GetBattery() (int, error)
+    GetShutter() (int, error)
     SetShutter(seconds int) error
+    GetISO() (int, error)
+    SetISO(iso int) error
     Capture() error
     DownloadLast(outputDir, filename string) error
 }
@@ -172,7 +186,8 @@ fujimatic/
 │   ├── HEADERS/           # Camera Control API headers
 │   ├── REDISTRIBUTABLES/  # Platform-specific SDK libraries (.dll, .so)
 │   ├── SAMPLES/           # SDK example code
-│   └── MANUAL/            # SDK documentation
+│   └── MANUAL/            # SDK documentation (.pdf files)
+|   └── SDK_REFERENCE/     # AI-generated notes based on the SDK documentation
 ├── libs/                   # Compiled wrapper libraries
 │   ├── windows/           # fmwrapper.dll
 │   └── linux/             # libfmwrapper.so

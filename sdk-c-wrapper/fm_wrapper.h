@@ -9,7 +9,10 @@ int fm_init(const char* sdk_path);
 int fm_connect();
 int fm_disconnect();
 int fm_get_battery(int* percent);
+int fm_get_shutter(int* seconds);
 int fm_set_shutter(int seconds);
+int fm_get_iso(int* iso);
+int fm_set_iso(int iso);
 int fm_capture();
 int fm_download_last(const char* outdir, const char* filename);
 

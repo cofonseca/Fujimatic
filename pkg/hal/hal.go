@@ -18,8 +18,17 @@ type Camera interface {
 	// GetBattery returns the current battery percentage
 	GetBattery() (int, error)
 
+	// GetShutter returns the current shutter speed in seconds
+	GetShutter() (int, error)
+
 	// SetShutter sets the shutter speed in seconds
 	SetShutter(seconds int) error
+
+	// GetISO returns the current ISO sensitivity value
+	GetISO() (int, error)
+
+	// SetISO sets the ISO sensitivity value
+	SetISO(iso int) error
 
 	// Capture triggers a photo capture
 	Capture() error

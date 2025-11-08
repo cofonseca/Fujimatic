@@ -11,6 +11,7 @@ type FakeCamera struct {
 	connected    bool
 	batteryLevel int
 	shutterSpeed int
+	iso          int
 	captureCount int
 	mu           sync.Mutex
 }
@@ -21,6 +22,7 @@ func NewFakeCamera() *FakeCamera {
 		connected:    false,
 		batteryLevel: 100,
 		shutterSpeed: 1,
+		iso:          800, // Default ISO
 		captureCount: 0,
 	}
 }
@@ -76,6 +78,18 @@ func (f *FakeCamera) GetBattery() (int, error) {
 	return f.batteryLevel, nil
 }
 
+// GetShutter returns the current shutter speed in seconds
+func (f *FakeCamera) GetShutter() (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.connected {
+		return 0, fmt.Errorf("camera not connected")
+	}
+
+	return f.shutterSpeed, nil
+}
+
 // SetShutter sets the shutter speed in seconds
 func (f *FakeCamera) SetShutter(seconds int) error {
 	f.mu.Lock()
@@ -90,6 +104,35 @@ func (f *FakeCamera) SetShutter(seconds int) error {
 	}
 
 	f.shutterSpeed = seconds
+	return nil
+}
+
+// GetISO returns the current ISO sensitivity value
+func (f *FakeCamera) GetISO() (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.connected {
+		return 0, fmt.Errorf("camera not connected")
+	}
+
+	return f.iso, nil
+}
+
+// SetISO sets the ISO sensitivity value
+func (f *FakeCamera) SetISO(iso int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	if iso < 100 || iso > 51200 {
+		return fmt.Errorf("ISO must be between 100 and 51200")
+	}
+
+	f.iso = iso
 	return nil
 }
 
