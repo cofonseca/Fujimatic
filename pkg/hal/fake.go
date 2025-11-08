@@ -12,6 +12,7 @@ type FakeCamera struct {
 	batteryLevel int
 	shutterSpeed int
 	iso          int
+	exposureMode int
 	captureCount int
 	mu           sync.Mutex
 }
@@ -23,6 +24,7 @@ func NewFakeCamera() *FakeCamera {
 		batteryLevel: 100,
 		shutterSpeed: 1,
 		iso:          800, // Default ISO
+		exposureMode: 0x0006, // Default to Program mode
 		captureCount: 0,
 	}
 }
@@ -78,7 +80,7 @@ func (f *FakeCamera) GetBattery() (int, error) {
 	return f.batteryLevel, nil
 }
 
-// GetShutter returns the current shutter speed in seconds
+// GetShutter returns the current shutter speed in microseconds
 func (f *FakeCamera) GetShutter() (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -90,8 +92,8 @@ func (f *FakeCamera) GetShutter() (int, error) {
 	return f.shutterSpeed, nil
 }
 
-// SetShutter sets the shutter speed in seconds
-func (f *FakeCamera) SetShutter(seconds int) error {
+// SetShutter sets the shutter speed in microseconds
+func (f *FakeCamera) SetShutter(microseconds int) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -99,12 +101,63 @@ func (f *FakeCamera) SetShutter(seconds int) error {
 		return fmt.Errorf("camera not connected")
 	}
 
-	if seconds < 0 {
-		return fmt.Errorf("shutter speed must be non-negative")
+	if microseconds < 125 {
+		return fmt.Errorf("shutter speed too fast (minimum: 125 microseconds = 1/8000s)")
 	}
 
-	f.shutterSpeed = seconds
+	if microseconds > 3600000000 {
+		return fmt.Errorf("shutter speed too slow (maximum: 3600000000 microseconds = 1 hour)")
+	}
+
+	f.shutterSpeed = microseconds
 	return nil
+}
+
+// ListShutterSpeeds returns all available shutter speeds for diagnostic purposes
+func (f *FakeCamera) ListShutterSpeeds() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	// Fake camera returns a standard set of shutter speeds
+	fmt.Println("Fake camera available shutter speeds (microseconds):")
+	standardSpeeds := []int{125, 250, 500, 1000, 2000, 4000, 8000, 16000, 32000, 64000, 125000, 250000, 500000, 1000000, 2000000, 4000000}
+	for i, speed := range standardSpeeds {
+		fmt.Printf("  %2d: %7d μs (%.6f seconds)\n", i+1, speed, float64(speed)/1000000.0)
+	}
+	return nil
+}
+
+// SetExposureMode sets the camera to Manual exposure mode
+// Only 0x0001 (Manual) is supported - other modes are ignored
+func (f *FakeCamera) SetExposureMode(mode int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	// Only Manual mode (0x0001) is supported for tethered control
+	f.exposureMode = 0x0001
+	fmt.Println("Fake camera: Manual exposure mode set")
+	return nil
+}
+
+// GetExposureMode returns the current camera exposure mode (always Manual for tethered control)
+func (f *FakeCamera) GetExposureMode() (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.connected {
+		return 0, fmt.Errorf("camera not connected")
+	}
+
+	// Always return Manual mode (0x0001) for tethered control
+	return 0x0001, nil
 }
 
 // GetISO returns the current ISO sensitivity value

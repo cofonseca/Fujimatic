@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/cfonseca/fujimatic/pkg/hal"
@@ -117,6 +118,12 @@ func (s *Shell) handleCommand(cmd string, args []string) error {
 		return s.cmdStatus()
 	case "battery":
 		return s.cmdBattery()
+	case "get":
+		return s.cmdGet(args)
+	case "set":
+		return s.cmdSet(args)
+	case "shutters":
+		return s.cmdListShutterSpeeds()
 	case "session":
 		return s.cmdSession(args)
 	case "capture":
@@ -137,6 +144,11 @@ func (s *Shell) cmdHelp() error {
 	fmt.Println("  disconnect           - Disconnect from camera")
 	fmt.Println("  status               - Show camera and session status")
 	fmt.Println("  battery              - Show battery level")
+	fmt.Println("  get <iso|shutter>    - Get current camera setting")
+	fmt.Println("  set <iso|shutter> <value> - Set camera setting")
+	fmt.Println("                         (shutter: 0.000125s to 3600s, e.g. '0.125s' or '2s')")
+	fmt.Println("  shutters              - List available shutter speeds (diagnostic)")
+	fmt.Println("                         (Camera set to Manual exposure mode automatically)")
 	fmt.Println()
 	fmt.Println("Session Management:")
 	fmt.Println("  session start <project> <outdir> - Start new capture session")
@@ -357,6 +369,189 @@ func (s *Shell) cmdCapture() error {
 	}
 
 	fmt.Printf("Captured and saved: %s\n", filepath)
+
+	return nil
+}
+
+func (s *Shell) cmdGet(args []string) error {
+	if !s.camera.IsConnected() {
+		return fmt.Errorf("camera not connected - use 'connect' first")
+	}
+
+	if len(args) == 0 {
+		return fmt.Errorf("usage: get <iso|shutter>")
+	}
+
+	param := args[0]
+
+	switch param {
+	case "iso":
+		iso, err := s.camera.GetISO()
+		if err != nil {
+			return fmt.Errorf("failed to get ISO: %w", err)
+		}
+		fmt.Printf("Current ISO: %d\n", iso)
+
+	case "shutter":
+		shutter, err := s.camera.GetShutter()
+		if err != nil {
+			return fmt.Errorf("failed to get shutter: %w", err)
+		}
+		// Convert microseconds to seconds for display
+		seconds := float64(shutter) / 1000000.0
+		fmt.Printf("Current shutter: %.6f seconds (%d microseconds)\n", seconds, shutter)
+
+	default:
+		return fmt.Errorf("unknown parameter: %s (use 'iso' or 'shutter')", param)
+	}
+
+	return nil
+}
+
+func (s *Shell) cmdSet(args []string) error {
+	if !s.camera.IsConnected() {
+		return fmt.Errorf("camera not connected - use 'connect' first")
+	}
+
+	if len(args) < 2 {
+		return fmt.Errorf("usage: set <iso|shutter> <value>")
+	}
+
+	param := args[0]
+	value := args[1]
+
+	switch param {
+	case "iso":
+		isoValue, err := parseInt(value, 100, 12800)
+		if err != nil {
+			return fmt.Errorf("invalid ISO value: %w", err)
+		}
+
+		if err := s.camera.SetISO(isoValue); err != nil {
+			return fmt.Errorf("failed to set ISO: %w", err)
+		}
+
+		fmt.Printf("ISO set to: %d\n", isoValue)
+
+	case "shutter":
+		shutterSeconds, err := parseShutterDuration(value)
+		if err != nil {
+			return fmt.Errorf("invalid shutter value: %w", err)
+		}
+
+		// Convert seconds to microseconds for camera
+		shutterMicroseconds := int(shutterSeconds * 1000000)
+
+		if err := s.camera.SetShutter(shutterMicroseconds); err != nil {
+			return fmt.Errorf("failed to set shutter: %w", err)
+		}
+
+		fmt.Printf("Shutter set to: %.6f seconds (%d microseconds)\n", shutterSeconds, shutterMicroseconds)
+
+	default:
+		return fmt.Errorf("unknown parameter: %s (use 'iso' or 'shutter')", param)
+	}
+
+	return nil
+}
+
+func parseInt(s string, min, max int) (int, error) {
+	value, err := parseInt64(s, int64(min), int64(max))
+	if err != nil {
+		return 0, err
+	}
+	return int(value), nil
+}
+
+func parseInt64(s string, min, max int64) (int64, error) {
+	value, err := parseIntToInt64(s)
+	if err != nil {
+		return 0, err
+	}
+
+	if value < min || value > max {
+		return 0, fmt.Errorf("value %d out of range [%d, %d]", value, min, max)
+	}
+
+	return value, nil
+}
+
+func parseIntToInt64(s string) (int64, error) {
+	// Handle time duration formats for shutter speed
+	if strings.HasSuffix(s, "s") {
+		durationStr := s[:len(s)-1]
+		duration, err := parseDuration(durationStr)
+		if err != nil {
+			return 0, err
+		}
+		return duration, nil
+	}
+
+	// Parse as plain integer
+	value, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid integer: %s", s)
+	}
+
+	return value, nil
+}
+
+func parseDuration(s string) (int64, error) {
+	// Parse time duration string like "0.5" (seconds) and convert to microseconds
+	seconds, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid duration: %s", s)
+	}
+
+	if seconds < 0 {
+		return 0, fmt.Errorf("duration cannot be negative")
+	}
+
+	// Convert seconds to microseconds
+	microseconds := int64(seconds * 1000000)
+	if microseconds < 125 { // 1/8000 second minimum
+		return 0, fmt.Errorf("duration too short (minimum: 1/8000 second = 125 microseconds)")
+	}
+
+	return microseconds, nil
+}
+
+func parseShutterDuration(s string) (float64, error) {
+	// Parse shutter duration and return as seconds (float64)
+	// Handle optional 's' suffix (e.g., "0.5s" -> "0.5")
+	if strings.HasSuffix(s, "s") {
+		s = s[:len(s)-1]
+	}
+
+	seconds, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid shutter duration: %s", s)
+	}
+
+	if seconds < 0 {
+		return 0, fmt.Errorf("shutter duration cannot be negative")
+	}
+
+	// Validate shutter speed range (1/8000s to 1 hour)
+	if seconds < 0.000125 { // 1/8000 second
+		return 0, fmt.Errorf("shutter too fast (minimum: 1/8000 second = 0.000125 seconds)")
+	}
+
+	if seconds > 3600 { // 1 hour maximum
+		return 0, fmt.Errorf("shutter too slow (maximum: 3600 seconds = 1 hour)")
+	}
+
+	return seconds, nil
+}
+
+func (s *Shell) cmdListShutterSpeeds() error {
+	if !s.camera.IsConnected() {
+		return fmt.Errorf("camera not connected - use 'connect' first")
+	}
+
+	if err := s.camera.ListShutterSpeeds(); err != nil {
+		return fmt.Errorf("failed to list shutter speeds: %w", err)
+	}
 
 	return nil
 }

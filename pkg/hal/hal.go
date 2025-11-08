@@ -18,11 +18,20 @@ type Camera interface {
 	// GetBattery returns the current battery percentage
 	GetBattery() (int, error)
 
-	// GetShutter returns the current shutter speed in seconds
+	// GetShutter returns the current shutter speed in microseconds
 	GetShutter() (int, error)
 
-	// SetShutter sets the shutter speed in seconds
-	SetShutter(seconds int) error
+	// SetShutter sets the shutter speed in microseconds
+	SetShutter(microseconds int) error
+
+	// ListShutterSpeeds returns all available shutter speeds for diagnostic purposes
+	ListShutterSpeeds() error
+
+	// SetExposureMode sets the camera to Manual exposure mode
+	SetExposureMode(mode int) error
+
+	// GetExposureMode returns the current camera exposure mode
+	GetExposureMode() (int, error)
 
 	// GetISO returns the current ISO sensitivity value
 	GetISO() (int, error)

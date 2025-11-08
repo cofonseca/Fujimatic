@@ -151,13 +151,22 @@ int fm_connect() {
         return -6;
     }
 
+    // CRITICAL: Give camera time to fully transition to PC mode
+    // Some cameras need 100-200ms to be ready for subsequent settings
+    printf("Waiting for camera to settle into PC control mode...\n");
+#ifdef _WIN32
+    Sleep(150);  // 150ms delay
+#else
+    usleep(150000);
+#endif
+
     printf("Setting media recording to RAW+JPEG...\n");
     result = XSDK_SetMediaRecord(g_hCamera, XSDK_MEDIAREC_RAWJPEG);
     if (result != 0) {
         fprintf(stderr, "fm_connect: XSDK_SetMediaRecord failed with code: %ld\n", result);
-        XSDK_Close(g_hCamera);
-        g_hCamera = NULL;
-        return -7;
+        fprintf(stderr, "  Continuing anyway - RAW capture will still work\n");
+        // Don't fail the connection - RAW capture is the priority
+        // Most important: we're in PC mode and can capture
     }
 
     // Get device info for display
@@ -238,56 +247,165 @@ int fm_get_battery(int* percent) {
     return 0;
 }
 
-int fm_get_shutter(int* seconds) {
+int fm_get_shutter(int* microseconds) {
     if (g_hCamera == NULL) {
         fprintf(stderr, "fm_get_shutter: Camera not connected\n");
         return -1;
     }
 
-    if (seconds == NULL) {
-        fprintf(stderr, "fm_get_shutter: seconds pointer is NULL\n");
+    if (microseconds == NULL) {
+        fprintf(stderr, "fm_get_shutter: microseconds pointer is NULL\n");
         return -2;
     }
 
-    // Get shutter speed from camera
+    printf("fm_get_shutter: Starting with camera handle %p\n", (void*)g_hCamera);
+
+    // Get shutter speed from camera (SDK returns microseconds)
     long speed_microseconds = 0;
     long bulb = 0;
+    printf("fm_get_shutter: Calling XSDK_GetShutterSpeed...\n");
     long result = XSDK_GetShutterSpeed(g_hCamera, &speed_microseconds, &bulb);
+    printf("fm_get_shutter: XSDK_GetShutterSpeed returned %ld\n", result);
+    printf("fm_get_shutter: speed_microseconds = %ld, bulb = %ld\n", speed_microseconds, bulb);
+
     if (result != 0) {
         fprintf(stderr, "fm_get_shutter: XSDK_GetShutterSpeed failed with code: %ld\n", result);
+        fprintf(stderr, "  Camera handle: %p\n", (void*)g_hCamera);
         return -3;
     }
 
-    // Convert microseconds to seconds (round to nearest second)
-    *seconds = (int)((speed_microseconds + 500000) / 1000000);
+    // Return microseconds directly (SDK units)
+    *microseconds = (int)speed_microseconds;
+    printf("fm_get_shutter: Setting *microseconds = %d (from %ld)\n", *microseconds, speed_microseconds);
 
-    printf("Current shutter speed: %d seconds (%ld microseconds, bulb=%ld)\n",
-           *seconds, speed_microseconds, bulb);
+    printf("Current shutter speed: %d microseconds (%.6f seconds, bulb=%ld)\n",
+           *microseconds, (double)speed_microseconds / 1000000.0, bulb);
     return 0;
 }
 
-int fm_set_shutter(int seconds) {
+int fm_set_shutter(int microseconds) {
     if (g_hCamera == NULL) {
         fprintf(stderr, "fm_set_shutter: Camera not connected\n");
         return -1;
     }
 
-    if (seconds < 0) {
-        fprintf(stderr, "fm_set_shutter: Invalid shutter speed (negative)\n");
+    if (microseconds < 125) {
+        fprintf(stderr, "fm_set_shutter: Invalid shutter speed (too fast, minimum: 125 microseconds = 1/8000s)\n");
         return -2;
     }
 
-    // Convert seconds to microseconds
-    long shutter_microseconds = (long)seconds * 1000000;
-    long bulb = 0; // Not using bulb mode for MVP
+    if (microseconds > 3600000000) { // 1 hour maximum
+        fprintf(stderr, "fm_set_shutter: Invalid shutter speed (too slow, maximum: 3600000000 microseconds = 1 hour)\n");
+        return -2;
+    }
 
-    long result = XSDK_SetShutterSpeed(g_hCamera, shutter_microseconds, bulb);
+    // Check if camera supports shutter control
+    long num_speeds = 0;
+    long result = XSDK_CapShutterSpeed(g_hCamera, &num_speeds, NULL, NULL);
+    if (result != 0) {
+        fprintf(stderr, "fm_set_shutter: XSDK_CapShutterSpeed failed with code: %ld\n", result);
+    } else if (num_speeds == 0) {
+        fprintf(stderr, "fm_set_shutter: Camera reports 0 supported shutter speeds\n");
+        fprintf(stderr, "  This usually means the camera is in Program AE mode\n");
+        fprintf(stderr, "  Try setting Manual mode first with 'exposure manual' command\n");
+        return -4;
+    }
+
+    // Set the shutter speed
+    long bulb = 0; // Not using bulb mode for MVP
+    result = XSDK_SetShutterSpeed(g_hCamera, microseconds, bulb);
     if (result != 0) {
         fprintf(stderr, "fm_set_shutter: XSDK_SetShutterSpeed failed with code: %ld\n", result);
+        fprintf(stderr, "  Camera handle: %p\n", (void*)g_hCamera);
+        fprintf(stderr, "  Shutter speed: %d microseconds\n", microseconds);
+        fprintf(stderr, "  Bulb mode: %ld\n", bulb);
         return -3;
     }
 
-    printf("Shutter speed set to %d seconds\n", seconds);
+    printf("Shutter speed set to %d microseconds (%.6f seconds)\n", microseconds, (double)microseconds / 1000000.0);
+    return 0;
+}
+
+// Diagnostic function to get all available shutter speeds
+int fm_list_shutter_speeds() {
+    if (g_hCamera == NULL) {
+        fprintf(stderr, "fm_list_shutter_speeds: Camera not connected\n");
+        return -1;
+    }
+
+    printf("Getting available shutter speeds...\n");
+    long num_speeds = 0;
+    long result = XSDK_CapShutterSpeed(g_hCamera, &num_speeds, NULL, NULL);
+    if (result != 0) {
+        fprintf(stderr, "fm_list_shutter_speeds: XSDK_CapShutterSpeed failed with code: %ld\n", result);
+        return -2;
+    }
+
+    printf("Camera supports %ld shutter speeds\n", num_speeds);
+
+    if (num_speeds > 0) {
+        long* valid_speeds = (long*)malloc(num_speeds * sizeof(long));
+        long* bulb_capable = (long*)malloc(num_speeds * sizeof(long));
+        if (valid_speeds != NULL && bulb_capable != NULL) {
+            result = XSDK_CapShutterSpeed(g_hCamera, &num_speeds, valid_speeds, bulb_capable);
+            if (result == 0) {
+                printf("Valid shutter speeds (microseconds):\n");
+                for (long i = 0; i < num_speeds; i++) {
+                    printf("  %2ld: %7ld μs (%.6f seconds) %s\n", 
+                           i + 1, valid_speeds[i], (double)valid_speeds[i] / 1000000.0,
+                           bulb_capable[i] ? "[bulb capable]" : "");
+                }
+            } else {
+                fprintf(stderr, "Failed to get shutter speed list: %ld\n", result);
+            }
+            free(valid_speeds);
+            free(bulb_capable);
+        } else {
+            fprintf(stderr, "Memory allocation failed for shutter speed list\n");
+        }
+    }
+
+    return 0;
+}
+
+int fm_set_exposure_mode(int mode) {
+    if (g_hCamera == NULL) {
+        fprintf(stderr, "fm_set_exposure_mode: Camera not connected\n");
+        return -1;
+    }
+
+    // Tethered control requires Manual exposure mode for full control
+    printf("Setting Manual exposure mode for tethered control...\n");
+    long result = XSDK_SetAEMode(g_hCamera, 0x0001); // Always Manual mode
+    if (result != 0) {
+        fprintf(stderr, "fm_set_exposure_mode: Failed to set Manual exposure mode: %ld\n", result);
+        return -3;
+    }
+
+    printf("Manual exposure mode set successfully\n");
+    return 0;
+}
+
+int fm_get_exposure_mode(int* mode) {
+    if (g_hCamera == NULL) {
+        fprintf(stderr, "fm_get_exposure_mode: Camera not connected\n");
+        return -1;
+    }
+
+    if (mode == NULL) {
+        fprintf(stderr, "fm_get_exposure_mode: mode pointer is NULL\n");
+        return -2;
+    }
+
+    long currentMode = 0;
+    long result = XSDK_GetAEMode(g_hCamera, &currentMode);
+    if (result != 0) {
+        fprintf(stderr, "fm_get_exposure_mode: XSDK_GetAEMode failed with code: %ld\n", result);
+        return -3;
+    }
+
+    *mode = (int)currentMode;
+    printf("Current exposure mode: 0x%04X\n", *mode);
     return 0;
 }
 

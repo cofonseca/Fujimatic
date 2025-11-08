@@ -90,7 +90,7 @@ func (r *RealCamera) GetBattery() (int, error) {
 	return r.sdkCamera.GetBattery()
 }
 
-// GetShutter returns the current shutter speed in seconds
+// GetShutter returns the current shutter speed in microseconds
 func (r *RealCamera) GetShutter() (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -106,8 +106,8 @@ func (r *RealCamera) GetShutter() (int, error) {
 	return r.sdkCamera.GetShutter()
 }
 
-// SetShutter sets the shutter speed in seconds
-func (r *RealCamera) SetShutter(seconds int) error {
+// SetShutter sets the shutter speed in microseconds
+func (r *RealCamera) SetShutter(microseconds int) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -119,7 +119,7 @@ func (r *RealCamera) SetShutter(seconds int) error {
 		return fmt.Errorf("SDK camera not initialized")
 	}
 
-	return r.sdkCamera.SetShutter(seconds)
+	return r.sdkCamera.SetShutter(microseconds)
 }
 
 // GetISO returns the current ISO sensitivity value
@@ -136,6 +136,56 @@ func (r *RealCamera) GetISO() (int, error) {
 	}
 
 	return r.sdkCamera.GetISO()
+}
+
+// ListShutterSpeeds returns all available shutter speeds for diagnostic purposes
+func (r *RealCamera) ListShutterSpeeds() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	if r.sdkCamera == nil {
+		return fmt.Errorf("SDK camera not initialized")
+	}
+
+	return r.sdkCamera.ListShutterSpeeds()
+}
+
+// SetExposureMode sets the camera to Manual exposure mode
+// Only 0x0001 (Manual) is supported - other modes are ignored
+func (r *RealCamera) SetExposureMode(mode int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	if r.sdkCamera == nil {
+		return fmt.Errorf("SDK camera not initialized")
+	}
+
+	// Always set to Manual mode (0x0001) for tethered control
+	return r.sdkCamera.SetExposureMode(0x0001)
+}
+
+// GetExposureMode returns the current camera exposure mode
+func (r *RealCamera) GetExposureMode() (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.connected {
+		return 0, fmt.Errorf("camera not connected")
+	}
+
+	if r.sdkCamera == nil {
+		return 0, fmt.Errorf("SDK camera not initialized")
+	}
+
+	return r.sdkCamera.GetExposureMode()
 }
 
 // SetISO sets the ISO sensitivity value

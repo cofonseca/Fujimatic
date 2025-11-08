@@ -61,6 +61,11 @@ go build -o bin\fujimatic.exe ./cmd/fujimatic
 go test ./...
 ```
 
+**Run tests without SDK dependencies (for development):**
+```cmd
+CGO_ENABLED=0 go test ./...
+```
+
 **Run specific package tests:**
 ```cmd
 go test ./pkg/hal
@@ -232,6 +237,32 @@ func TestIntegrationCapture(t *testing.T) {
 
 ## Development Patterns
 
+### Code Change Authorization Requirements
+
+**CRITICAL**: Never make code changes without explicit user permission.
+
+**Rules:**
+- **No Code Changes**: Do not edit, modify, or implement code without explicit authorization
+- **No Commits**: Do not make git commits or any version control changes
+- **Documentation Only**: Reference existing documentation and provide analysis
+- **Ask First**: Always request permission before any code work, even if seemingly minor
+
+**When User Asks for Documentation Research:**
+- Reference SDK manuals and API documentation only
+- Provide analysis and recommendations
+- Do not implement or modify code
+- Wait for explicit approval before any development work
+
+### Manual Exposure Mode Only
+
+**Design Decision**: Fujimatic is designed for tethered control in film scanning and astrophotography, which requires full manual control. Automatic exposure modes would interfere with the workflow.
+
+**Implementation:**
+- Camera is automatically set to Manual exposure mode when connecting
+- User cannot select other exposure modes
+- All shutter/ISO controls work immediately after connection
+- Simplified workflow: connect → control settings → capture
+
 ### cgo Memory Management
 - Always free C strings with `defer C.free(unsafe.Pointer(cStr))`
 - Convert Go strings to C: `C.CString(goString)`
@@ -318,3 +349,17 @@ Based on STORIES.md, the next stories to implement are:
 - **SDK Path**: Set FUJI_SDK_PATH before running application
 - **Connection State**: Always check Camera.IsConnected() before operations
 - **Thread Safety**: HAL implementations use mutexes for concurrent access
+
+## Hardware Testing
+
+**Real Camera Testing Plan**: See `HARDWARE_TESTING_PLAN.md` for comprehensive testing procedure with X-T3 camera.
+
+**Test Requirements for C-2 Completion:**
+- ✅ SDK initialization
+- ✅ Camera connection via USB
+- ✅ Battery level reading
+- ✅ ISO/shutter read/write functionality (ISO: 100-12800, Shutter: 1/8000s minimum)
+- ✅ Complete capture and download workflow
+- ✅ Real hardware validation (PENDING)
+
+**Current Status**: CLI implementation complete, pending real hardware testing with X-T3.

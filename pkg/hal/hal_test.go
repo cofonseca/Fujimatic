@@ -80,22 +80,28 @@ func TestFakeCamera_SetShutter(t *testing.T) {
 	camera := NewFakeCamera()
 
 	// Test setting shutter when not connected
-	err := camera.SetShutter(5)
+	err := camera.SetShutter(125000) // 0.125 seconds
 	if err == nil {
 		t.Error("SetShutter() should fail when not connected")
 	}
 
 	// Test setting shutter when connected
 	camera.Connect()
-	err = camera.SetShutter(5)
+	err = camera.SetShutter(125000) // 0.125 seconds
 	if err != nil {
 		t.Errorf("SetShutter() failed: %v", err)
 	}
 
-	// Test invalid shutter speed
-	err = camera.SetShutter(-1)
+	// Test invalid shutter speed (too fast)
+	err = camera.SetShutter(100) // 100 microseconds < 125 minimum
 	if err == nil {
-		t.Error("SetShutter() should fail with negative shutter speed")
+		t.Error("SetShutter() should fail with too-fast shutter speed")
+	}
+
+	// Test invalid shutter speed (too slow)
+	err = camera.SetShutter(4000000000) // 4000 seconds > 3600 maximum
+	if err == nil {
+		t.Error("SetShutter() should fail with too-slow shutter speed")
 	}
 }
 

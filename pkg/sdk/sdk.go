@@ -98,36 +98,83 @@ func (c *Camera) GetBattery() (int, error) {
 	return 0, fmt.Errorf("failed to get battery level, code: %d", result)
 }
 
-// GetShutter returns the current shutter speed in seconds
+// GetShutter returns the current shutter speed in microseconds
 func (c *Camera) GetShutter() (int, error) {
 	if !c.connected {
 		return 0, fmt.Errorf("camera not connected")
 	}
 
-	var seconds C.int
-	result := C.fm_get_shutter(&seconds)
+	var microseconds C.int
+	result := C.fm_get_shutter(&microseconds)
 
 	if result == 0 {
-		return int(seconds), nil
+		return int(microseconds), nil
 	}
 	return 0, fmt.Errorf("failed to get shutter speed, code: %d", result)
 }
 
-// SetShutter sets the shutter speed in seconds
-func (c *Camera) SetShutter(seconds int) error {
+// SetShutter sets the shutter speed in microseconds
+func (c *Camera) SetShutter(microseconds int) error {
 	if !c.connected {
 		return fmt.Errorf("camera not connected")
 	}
 
-	if seconds < 0 {
-		return fmt.Errorf("shutter speed must be non-negative")
+	if microseconds < 125 {
+		return fmt.Errorf("shutter speed too fast (minimum: 125 microseconds = 1/8000s)")
 	}
 
-	result := C.fm_set_shutter(C.int(seconds))
+	if microseconds > 3600000000 {
+		return fmt.Errorf("shutter speed too slow (maximum: 3600000000 microseconds = 1 hour)")
+	}
+
+	result := C.fm_set_shutter(C.int(microseconds))
 	if result == 0 {
 		return nil
 	}
 	return fmt.Errorf("failed to set shutter speed, code: %d", result)
+}
+
+// ListShutterSpeeds returns all available shutter speeds for diagnostic purposes
+func (c *Camera) ListShutterSpeeds() error {
+	if !c.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	result := C.fm_list_shutter_speeds()
+	if result == 0 {
+		return nil
+	}
+	return fmt.Errorf("failed to list shutter speeds, code: %d", result)
+}
+
+// SetExposureMode sets the camera to Manual exposure mode
+// Only 0x0001 (Manual) is supported for tethered control
+func (c *Camera) SetExposureMode(mode int) error {
+	if !c.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	// Always set to Manual mode (0x0001) for tethered control
+	result := C.fm_set_exposure_mode(C.int(0x0001))
+	if result == 0 {
+		return nil
+	}
+	return fmt.Errorf("failed to set Manual exposure mode, code: %d", result)
+}
+
+// GetExposureMode returns the current camera exposure mode
+func (c *Camera) GetExposureMode() (int, error) {
+	if !c.connected {
+		return 0, fmt.Errorf("camera not connected")
+	}
+
+	var mode C.int
+	result := C.fm_get_exposure_mode(&mode)
+
+	if result == 0 {
+		return int(mode), nil
+	}
+	return 0, fmt.Errorf("failed to get exposure mode, code: %d", result)
 }
 
 // GetISO returns the current ISO sensitivity value
