@@ -74,6 +74,7 @@ temp/
 test_*
 *_PROGRESS.md
 *_test.*
+/archive
 
 # AI/Claude specific files
 .claude/

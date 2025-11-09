@@ -5,24 +5,35 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/cfonseca/fujimatic/pkg/hal"
 	"github.com/cfonseca/fujimatic/pkg/session"
 )
 
 type Shell struct {
-	camera  hal.Camera
-	session *session.Session
-	reader  *bufio.Reader
+	camera         hal.Camera
+	session        *session.Session
+	reader         *bufio.Reader
+	interruptChan  chan os.Signal
+	intervalActive bool // Track if intervalometer is running
+	pauseReqChan   chan bool // Request pause from command
+	stopReqChan    chan bool // Request stop from command
 }
 
 func NewShell(camera hal.Camera) *Shell {
+	interruptChan := make(chan os.Signal, 1)
 	return &Shell{
-		camera: camera,
-		reader: bufio.NewReader(os.Stdin),
+		camera:        camera,
+		reader:        bufio.NewReader(os.Stdin),
+		interruptChan: interruptChan,
+		pauseReqChan:  make(chan bool, 1),
+		stopReqChan:   make(chan bool, 1),
 	}
 }
 
@@ -79,6 +90,29 @@ func (s *Shell) Run() {
 	fmt.Println("Type 'help' for available commands")
 	fmt.Println()
 
+	// Set up Ctrl+C handling for the entire shell
+	signal.Notify(s.interruptChan, os.Interrupt, syscall.SIGTERM)
+
+	// Handle Ctrl+C in a separate goroutine
+	go func() {
+		for range s.interruptChan {
+			fmt.Println() // Print newline after ^C
+			if s.intervalActive {
+				// Pause the active intervalometer
+				fmt.Println("Ctrl+C detected - pausing intervalometer...")
+				select {
+				case s.pauseReqChan <- true:
+					// Successfully sent pause request
+				default:
+					fmt.Println("Warning: could not send pause request")
+				}
+			} else {
+				// Ask if user wants to exit
+				fmt.Println("Press Ctrl+C again to exit, or press Enter to continue")
+			}
+		}
+	}()
+
 	for {
 		fmt.Print("> ")
 		line, err := s.reader.ReadString('\n')
@@ -127,7 +161,13 @@ func (s *Shell) handleCommand(cmd string, args []string) error {
 	case "session":
 		return s.cmdSession(args)
 	case "capture":
-		return s.cmdCapture()
+		return s.cmdCapture(args)
+	case "pause":
+		return s.cmdPause()
+	case "resume":
+		return s.cmdResume()
+	case "stop":
+		return s.cmdStop()
 	case "exit", "quit":
 		return s.cmdExit()
 	default:
@@ -161,7 +201,13 @@ func (s *Shell) cmdHelp() error {
 	fmt.Println("  session load         - Load saved session state")
 	fmt.Println()
 	fmt.Println("Capture:")
-	fmt.Println("  capture              - Capture and download image")
+	fmt.Println("  capture              - Capture and download single image")
+	fmt.Println("  capture <count>      - Capture multiple frames (count frames, no delay)")
+	fmt.Println("  capture <count> <delay> - Capture with intervalometer (delay in seconds)")
+	fmt.Println("                         Use count=0 for infinite captures")
+	fmt.Println("  pause                - Pause active intervalometer (saves state)")
+	fmt.Println("  resume               - Resume paused intervalometer")
+	fmt.Println("  stop                 - Stop intervalometer (discards state)")
 	fmt.Println()
 	fmt.Println("Utility:")
 	fmt.Println("  help                 - Show this help message")
@@ -216,6 +262,21 @@ func (s *Shell) cmdStatus() error {
 		} else {
 			fmt.Printf("  Battery: %d%%\n", battery)
 		}
+
+		// Show current camera settings
+		if iso, err := s.camera.GetISO(); err == nil {
+			fmt.Printf("  ISO: %d\n", iso)
+		}
+
+		if shutter, err := s.camera.GetShutter(); err == nil {
+			seconds := float64(shutter) / 1000000.0
+			fraction := getPhotographicFraction(seconds)
+			if fraction != "" {
+				fmt.Printf("  Shutter: %.6fs (%s)\n", seconds, fraction)
+			} else {
+				fmt.Printf("  Shutter: %.6fs\n", seconds)
+			}
+		}
 	} else {
 		fmt.Println("  Camera: Not connected")
 	}
@@ -227,7 +288,55 @@ func (s *Shell) cmdStatus() error {
 		fmt.Println("  Session: Active")
 		fmt.Printf("  Project: %s\n", s.session.ProjectName)
 		fmt.Printf("  Output Directory: %s\n", s.session.OutputDir)
-		fmt.Printf("  Next Sequence: %04d\n", s.session.SequenceNumber)
+		fmt.Printf("  Next File: %s\n", s.session.GetNextFilename())
+
+		// Intervalometer status (if active)
+		if s.session.IntervalActive {
+			fmt.Println()
+			fmt.Println("  Intervalometer:")
+
+			// Progress
+			if s.session.IntervalTotalFrames == 0 {
+				fmt.Printf("    Progress: Frame %d (infinite)\n", s.session.IntervalCurrentFrame)
+			} else {
+				percentage := float64(s.session.IntervalCurrentFrame) * 100.0 / float64(s.session.IntervalTotalFrames)
+				fmt.Printf("    Progress: Frame %d/%d (%.0f%%)\n",
+					s.session.IntervalCurrentFrame,
+					s.session.IntervalTotalFrames,
+					percentage)
+			}
+
+			// Delay
+			delaySec := int(s.session.IntervalDelay.Seconds())
+			fmt.Printf("    Delay: %ds between frames\n", delaySec)
+
+			// Elapsed time
+			elapsed := time.Since(s.session.IntervalStartTime)
+			fmt.Printf("    Elapsed: %s\n", formatDuration(elapsed))
+
+			// Integration time
+			integrationTime := s.session.GetIntegrationTime()
+			integrationDuration := time.Duration(integrationTime * float64(time.Second))
+			fmt.Printf("    Integration time: %s (%d × %.3fs exposures)\n",
+				formatDuration(integrationDuration),
+				s.session.IntervalCurrentFrame,
+				float64(s.session.LastShutterSpeed)/1000000.0)
+
+			// Estimated remaining time (if not infinite)
+			if s.session.IntervalTotalFrames > 0 && s.session.IntervalCurrentFrame > 0 {
+				framesRemaining := s.session.IntervalTotalFrames - s.session.IntervalCurrentFrame
+				avgTimePerFrame := elapsed.Seconds() / float64(s.session.IntervalCurrentFrame)
+				estimatedRemaining := time.Duration(float64(framesRemaining)*avgTimePerFrame) * time.Second
+				fmt.Printf("    Estimated remaining: %s\n", formatDuration(estimatedRemaining))
+			}
+
+			// Status
+			if s.session.IntervalPaused {
+				fmt.Println("    Status: Paused")
+			} else {
+				fmt.Println("    Status: Active")
+			}
+		}
 	} else {
 		fmt.Println("  Session: None")
 	}
@@ -333,7 +442,7 @@ func (s *Shell) cmdSessionLoad() error {
 	return nil
 }
 
-func (s *Shell) cmdCapture() error {
+func (s *Shell) cmdCapture(args []string) error {
 	if !s.camera.IsConnected() {
 		return fmt.Errorf("camera not connected - use 'connect' first")
 	}
@@ -365,6 +474,48 @@ func (s *Shell) cmdCapture() error {
 		fmt.Printf("Session created: %s -> %s\n", projectName, outputDir)
 	}
 
+	// Parse arguments: capture [count] [delay]
+	var count int = 1 // Default: single capture
+	var delay int = 0 // Default: no delay
+
+	if len(args) >= 1 {
+		var err error
+		count, err = strconv.Atoi(args[0])
+		if err != nil {
+			return fmt.Errorf("invalid count argument: %s", args[0])
+		}
+		if count < 0 {
+			return fmt.Errorf("count cannot be negative")
+		}
+	}
+
+	if len(args) >= 2 {
+		var err error
+		delay, err = strconv.Atoi(args[1])
+		if err != nil {
+			return fmt.Errorf("invalid delay argument: %s", args[1])
+		}
+		if delay < 0 {
+			return fmt.Errorf("delay cannot be negative")
+		}
+	}
+
+	// Single capture mode (count=0 or count=1 with no args)
+	if count == 1 && len(args) == 0 {
+		return s.captureSingle()
+	}
+
+	// Intervalometer mode (count > 1 or count == 0 for infinite)
+	// Run in background goroutine so REPL stays responsive
+	go s.captureInterval(count, delay)
+
+	fmt.Println("Intervalometer started in background")
+	fmt.Println("Type 'status' to see progress, 'pause' to pause, 'stop' to end")
+
+	return nil
+}
+
+func (s *Shell) captureSingle() error {
 	filename := s.session.GetNextFilename()
 	filepath := s.session.GetNextFilePath()
 	fmt.Printf("Capturing %s...\n", filename)
@@ -374,6 +525,244 @@ func (s *Shell) cmdCapture() error {
 	}
 
 	fmt.Printf("Captured and saved: %s\n", filepath)
+	return nil
+}
+
+func (s *Shell) captureInterval(count int, delaySec int) {
+	// Get current shutter speed for integration time tracking
+	shutterSpeed, err := s.camera.GetShutter()
+	if err != nil {
+		fmt.Printf("\nError: failed to get shutter speed: %v\n> ", err)
+		return
+	}
+
+	delayDuration := time.Duration(delaySec) * time.Second
+
+	// Start intervalometer (only if not already active/resuming)
+	if !s.session.IntervalActive {
+		s.session.StartInterval(count, delayDuration, shutterSpeed)
+		if count == 0 {
+			fmt.Printf("\nStarting intervalometer: infinite frames, %ds delay\n", delaySec)
+		} else {
+			fmt.Printf("\nStarting intervalometer: %d frames, %ds delay\n", count, delaySec)
+		}
+	} else {
+		// Resuming
+		if count == 0 {
+			fmt.Printf("\nResuming intervalometer: frame %d onwards (infinite), %ds delay\n",
+				s.session.IntervalCurrentFrame+1, delaySec)
+		} else {
+			fmt.Printf("\nResuming intervalometer: frame %d/%d, %ds delay\n",
+				s.session.IntervalCurrentFrame+1, count, delaySec)
+		}
+	}
+
+	// Mark intervalometer as active
+	s.intervalActive = true
+	defer func() {
+		s.intervalActive = false
+	}()
+
+	fmt.Print("Type 'pause' to pause, 'stop' to end, or press Ctrl+C to pause\n> ")
+
+	// Main capture loop
+	for {
+		// Check for pause/stop requests from commands
+		select {
+		case <-s.pauseReqChan:
+			s.session.PauseInterval()
+			if err := s.session.Save(); err != nil {
+				fmt.Printf("\nWarning: failed to save session: %v\n", err)
+			}
+			fmt.Print("\nIntervalometer paused - type 'resume' to continue\n> ")
+			return
+
+		case <-s.stopReqChan:
+			s.session.ResetInterval()
+			if err := s.session.Save(); err != nil {
+				fmt.Printf("\nWarning: failed to save session: %v\n", err)
+			}
+			fmt.Print("\nIntervalometer stopped\n> ")
+			return
+
+		default:
+			// Continue with capture
+		}
+
+		// Check if paused (by other means)
+		if s.session.IntervalPaused {
+			fmt.Print("\nIntervalometer paused\n> ")
+			return
+		}
+
+		// Check if we've reached the count (if not infinite)
+		if count > 0 && s.session.IntervalCurrentFrame >= count {
+			fmt.Print("\n✓ Intervalometer completed!\n> ")
+			s.session.ResetInterval()
+			if err := s.session.Save(); err != nil {
+				fmt.Printf("Warning: failed to save session: %v\n> ", err)
+			}
+			return
+		}
+
+		// Increment frame counter
+		s.session.IntervalCurrentFrame++
+
+		// Check battery before capture
+		battery, err := s.camera.GetBattery()
+		if err != nil {
+			fmt.Printf("\nWarning: failed to check battery: %v\n> ", err)
+		} else {
+			// Auto-pause at 10% battery
+			if battery <= 10 {
+				fmt.Printf("\n⚠️  Battery at %d%% - AUTO-PAUSED\n", battery)
+				fmt.Print("Please charge or replace battery, then type 'resume' to continue\n> ")
+				s.session.PauseInterval()
+				if err := s.session.Save(); err != nil {
+					fmt.Printf("Warning: failed to save session: %v\n> ", err)
+				}
+				return
+			}
+		}
+
+		// Display progress
+		if count == 0 {
+			fmt.Printf("\nFrame %d - ", s.session.IntervalCurrentFrame)
+		} else {
+			fmt.Printf("\nFrame %d/%d - ", s.session.IntervalCurrentFrame, count)
+		}
+
+		// Capture and download
+		startTime := time.Now()
+		filename := s.session.GetNextFilename()
+		fmt.Printf("Capturing %s... ", filename)
+
+		if err := s.session.Capture(); err != nil {
+			fmt.Printf("Error: capture failed: %v\n> ", err)
+			return
+		}
+
+		elapsed := time.Since(startTime)
+		fmt.Printf("Done (%.1fs) - ", elapsed.Seconds())
+
+		// Display battery level
+		if battery, err := s.camera.GetBattery(); err == nil {
+			fmt.Printf("Battery: %d%%", battery)
+		}
+
+		// Save session state periodically (every 5 frames)
+		if s.session.IntervalCurrentFrame%5 == 0 {
+			if err := s.session.Save(); err != nil {
+				fmt.Printf(" - Warning: failed to save session: %v", err)
+			}
+		}
+
+		// Wait for delay before next capture (if not the last frame)
+		if delaySec > 0 && (count == 0 || s.session.IntervalCurrentFrame < count) {
+			fmt.Printf(" - Next in %ds\n> ", delaySec)
+
+			// Use select to handle delay and pause/stop commands
+			delayTimer := time.NewTimer(delayDuration)
+			select {
+			case <-delayTimer.C:
+				// Delay completed normally
+			case <-s.pauseReqChan:
+				delayTimer.Stop()
+				s.session.PauseInterval()
+				if err := s.session.Save(); err != nil {
+					fmt.Printf("\nWarning: failed to save session: %v\n", err)
+				}
+				fmt.Print("\nIntervalometer paused - type 'resume' to continue\n> ")
+				return
+			case <-s.stopReqChan:
+				delayTimer.Stop()
+				s.session.ResetInterval()
+				if err := s.session.Save(); err != nil {
+					fmt.Printf("\nWarning: failed to save session: %v\n", err)
+				}
+				fmt.Print("\nIntervalometer stopped\n> ")
+				return
+			}
+		} else {
+			fmt.Print("\n> ")
+		}
+	}
+}
+
+func (s *Shell) cmdPause() error {
+	if s.session == nil {
+		return fmt.Errorf("no active session")
+	}
+
+	if !s.session.IntervalActive {
+		return fmt.Errorf("no intervalometer active")
+	}
+
+	if s.session.IntervalPaused {
+		fmt.Println("Intervalometer is already paused")
+		return nil
+	}
+
+	if !s.intervalActive {
+		return fmt.Errorf("intervalometer not running")
+	}
+
+	// Send pause request to the running interval goroutine
+	select {
+	case s.pauseReqChan <- true:
+		fmt.Println("Pause request sent...")
+	default:
+		fmt.Println("Warning: pause channel full, trying again...")
+		s.pauseReqChan <- true
+	}
+
+	return nil
+}
+
+func (s *Shell) cmdResume() error {
+	if s.session == nil {
+		return fmt.Errorf("no active session")
+	}
+
+	if !s.session.IntervalActive {
+		return fmt.Errorf("no intervalometer active")
+	}
+
+	if !s.session.IntervalPaused {
+		fmt.Println("Intervalometer is already running")
+		return nil
+	}
+
+	s.session.ResumeInterval()
+
+	// Restart the interval loop in background goroutine
+	delaySec := int(s.session.IntervalDelay.Seconds())
+	go s.captureInterval(s.session.IntervalTotalFrames, delaySec)
+
+	return nil
+}
+
+func (s *Shell) cmdStop() error {
+	if s.session == nil {
+		return fmt.Errorf("no active session")
+	}
+
+	if !s.session.IntervalActive {
+		return fmt.Errorf("no intervalometer active")
+	}
+
+	if !s.intervalActive {
+		return fmt.Errorf("intervalometer not running")
+	}
+
+	// Send stop request to the running interval goroutine
+	select {
+	case s.stopReqChan <- true:
+		fmt.Println("Stop request sent...")
+	default:
+		fmt.Println("Warning: stop channel full, trying again...")
+		s.stopReqChan <- true
+	}
 
 	return nil
 }
@@ -715,4 +1104,14 @@ func (s *Shell) cmdExit() error {
 	os.Exit(0)
 
 	return nil
+}
+
+// formatDuration formats a duration in a human-readable format
+// e.g., "0h 15m 32s" or "1h 52m 18s"
+func formatDuration(d time.Duration) string {
+	hours := int(d.Hours())
+	minutes := int(d.Minutes()) % 60
+	seconds := int(d.Seconds()) % 60
+
+	return fmt.Sprintf("%dh %dm %ds", hours, minutes, seconds)
 }

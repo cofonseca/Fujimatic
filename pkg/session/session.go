@@ -17,6 +17,15 @@ type Session struct {
 	SequenceNumber int       `json:"sequence_number"`
 	CreatedAt      time.Time `json:"created_at"`
 	camera         hal.Camera
+
+	// Intervalometer state
+	IntervalActive      bool          `json:"interval_active"`
+	IntervalTotalFrames int           `json:"interval_total_frames"` // 0 = infinite
+	IntervalCurrentFrame int          `json:"interval_current_frame"`
+	IntervalDelay       time.Duration `json:"interval_delay"`        // Delay between frames
+	IntervalPaused      bool          `json:"interval_paused"`
+	IntervalStartTime   time.Time     `json:"interval_start_time"`
+	LastShutterSpeed    int           `json:"last_shutter_speed"`    // In microseconds, for integration time calculation
 }
 
 // New creates a new capture session
@@ -158,4 +167,51 @@ func getConfigDir() (string, error) {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// GetIntegrationTime calculates total integration time (frames × shutter speed)
+// Returns integration time in seconds
+func (s *Session) GetIntegrationTime() float64 {
+	if s.IntervalCurrentFrame == 0 || s.LastShutterSpeed == 0 {
+		return 0.0
+	}
+	// Convert microseconds to seconds
+	shutterSeconds := float64(s.LastShutterSpeed) / 1_000_000.0
+	return float64(s.IntervalCurrentFrame) * shutterSeconds
+}
+
+// IsIntervalActive returns true if an intervalometer sequence is active
+func (s *Session) IsIntervalActive() bool {
+	return s.IntervalActive && !s.IntervalPaused
+}
+
+// ResetInterval clears all intervalometer state (for stop command)
+func (s *Session) ResetInterval() {
+	s.IntervalActive = false
+	s.IntervalTotalFrames = 0
+	s.IntervalCurrentFrame = 0
+	s.IntervalDelay = 0
+	s.IntervalPaused = false
+	s.IntervalStartTime = time.Time{}
+}
+
+// StartInterval initializes the intervalometer state
+func (s *Session) StartInterval(totalFrames int, delay time.Duration, shutterSpeed int) {
+	s.IntervalActive = true
+	s.IntervalTotalFrames = totalFrames
+	s.IntervalCurrentFrame = 0
+	s.IntervalDelay = delay
+	s.IntervalPaused = false
+	s.IntervalStartTime = time.Now()
+	s.LastShutterSpeed = shutterSpeed
+}
+
+// PauseInterval pauses the intervalometer
+func (s *Session) PauseInterval() {
+	s.IntervalPaused = true
+}
+
+// ResumeInterval resumes the intervalometer
+func (s *Session) ResumeInterval() {
+	s.IntervalPaused = false
 }
