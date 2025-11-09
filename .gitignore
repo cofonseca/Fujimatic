@@ -51,7 +51,8 @@ sdk/
 *.yaml
 *.yml
 # Ignore all other markdown files (keep README.md only)
-*.md
+CLAUDE.md
+STORIES.md
 
 # Build artifacts
 *.o
@@ -72,7 +73,6 @@ temp/
 
 # Test data and development files
 test_*
-*_PROGRESS.md
 *_test.*
 /archive
 
