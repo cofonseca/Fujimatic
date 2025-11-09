@@ -20,6 +20,7 @@ int fm_capture();
 int fm_download_last(const char* outdir, const char* filename);
 int fm_get_supported_shutter_count(int* count);
 int fm_get_supported_shutter_speeds(int* count, int* speeds);
+int fm_set_verbose(int enabled);
 
 #ifdef __cplusplus
 }

@@ -53,11 +53,27 @@ func Init(sdkPath string) (InitResult, error) {
 
 	// Call C function
 	result := C.fm_init(cPath)
-	
+
 	if result == 0 {
 		return InitSuccess, nil
 	}
 	return InitError, fmt.Errorf("SDK initialization failed with code: %d", result)
+}
+
+// SetVerbose enables or disables verbose logging in the C wrapper layer
+func SetVerbose(enabled bool) error {
+	var cEnabled C.int
+	if enabled {
+		cEnabled = 1
+	} else {
+		cEnabled = 0
+	}
+
+	result := C.fm_set_verbose(cEnabled)
+	if result == 0 {
+		return nil
+	}
+	return fmt.Errorf("failed to set verbose mode, code: %d", result)
 }
 
 // Connect to the camera

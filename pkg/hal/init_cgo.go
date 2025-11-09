@@ -21,3 +21,8 @@ func InitSDK(sdkPath string) (InitResult, error) {
 
 	return InitError, nil
 }
+
+// SetVerbose enables or disables verbose logging in the SDK layer
+func SetVerbose(enabled bool) error {
+	return sdk.SetVerbose(enabled)
+}

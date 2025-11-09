@@ -18,6 +18,7 @@
 // Global state
 static LIB_HANDLE g_hLib = NULL;
 static XSDK_HANDLE g_hCamera = NULL;
+static int verbose_logging = 0;
 
 // Battery level conversion helper
 static int convert_battery_to_percent(long battery_code) {
@@ -71,7 +72,9 @@ int fm_init(const char* sdk_path) {
 #endif
 
     // Initialize the SDK
-    printf("Calling XSDK_Init...\n");
+    if (verbose_logging) {
+        printf("Calling XSDK_Init...\n");
+    }
     long result = XSDK_Init(g_hLib);
     if (result != 0) {
         fprintf(stderr, "fm_init: XSDK_Init failed with code: %ld\n", result);
@@ -84,7 +87,9 @@ int fm_init(const char* sdk_path) {
         return -3;
     }
 
-    printf("Fujifilm SDK initialized successfully\n");
+    if (verbose_logging) {
+        printf("Fujifilm SDK initialized successfully\n");
+    }
     return 0;
 }
 
@@ -105,11 +110,15 @@ int fm_connect() {
 
     #define XSDK_DSC_IF_USB 0x00000001
 
-    printf("Detecting cameras on USB interface...\n");
+    if (verbose_logging) {
+        printf("Detecting cameras on USB interface...\n");
+    }
     long num_cameras = 0;
     long result = XSDK_Detect(XSDK_DSC_IF_USB, "", NULL, &num_cameras);
 
-    printf("XSDK_Detect result: %ld, count: %ld\n", result, num_cameras);
+    if (verbose_logging) {
+        printf("XSDK_Detect result: %ld, count: %ld\n", result, num_cameras);
+    }
 
     if (result != 0) {
         fprintf(stderr, "fm_connect: XSDK_Detect failed with code: %ld\n", result);
@@ -126,7 +135,9 @@ int fm_connect() {
         return -4;
     }
 
-    printf("Found %ld camera(s) - opening first camera with ENUM:0\n", num_cameras);
+    if (verbose_logging) {
+        printf("Found %ld camera(s) - opening first camera with ENUM:0\n", num_cameras);
+    }
 
     // Open first enumerated camera using ENUM:0 device string (matches ReleaseButton sample)
     long capability_bitmap = 0;
@@ -142,7 +153,9 @@ int fm_connect() {
     #define XSDK_PRIORITY_PC 0x0002
     #define XSDK_MEDIAREC_RAWJPEG 0x0001
 
-    printf("Setting camera to PC priority mode...\n");
+    if (verbose_logging) {
+        printf("Setting camera to PC priority mode...\n");
+    }
     result = XSDK_SetPriorityMode(g_hCamera, XSDK_PRIORITY_PC);
     if (result != 0) {
         fprintf(stderr, "fm_connect: XSDK_SetPriorityMode failed with code: %ld\n", result);
@@ -153,14 +166,18 @@ int fm_connect() {
 
     // CRITICAL: Give camera time to fully transition to PC mode
     // Some cameras need 100-200ms to be ready for subsequent settings
-    printf("Waiting for camera to settle into PC control mode...\n");
+    if (verbose_logging) {
+        printf("Waiting for camera to settle into PC control mode...\n");
+    }
 #ifdef _WIN32
     Sleep(150);  // 150ms delay
 #else
     usleep(150000);
 #endif
 
-    printf("Setting media recording to RAW+JPEG...\n");
+    if (verbose_logging) {
+        printf("Setting media recording to RAW+JPEG...\n");
+    }
     result = XSDK_SetMediaRecord(g_hCamera, XSDK_MEDIAREC_RAWJPEG);
     if (result != 0) {
         fprintf(stderr, "fm_connect: XSDK_SetMediaRecord failed with code: %ld\n", result);
@@ -195,7 +212,9 @@ int fm_disconnect() {
     // Without this, the camera stays in PC mode and reconnection fails
     #define XSDK_PRIORITY_CAMERA 0x0001
 
-    printf("Restoring camera to CAMERA priority mode...\n");
+    if (verbose_logging) {
+        printf("Restoring camera to CAMERA priority mode...\n");
+    }
     long result = XSDK_SetPriorityMode(g_hCamera, XSDK_PRIORITY_CAMERA);
     if (result != 0) {
         fprintf(stderr, "fm_disconnect: Warning - failed to restore camera priority mode (code: %ld)\n", result);
@@ -240,8 +259,10 @@ int fm_get_battery(int* percent) {
 
     // First parameter should be battery code
     // Log all parameters for debugging
-    printf("Battery info - param1=%ld, param2=%ld, param3=%ld, param4=%ld, param5=%ld, param6=%ld\n",
-           param1, param2, param3, param4, param5, param6);
+    if (verbose_logging) {
+        printf("Battery info - param1=%ld, param2=%ld, param3=%ld, param4=%ld, param5=%ld, param6=%ld\n",
+               param1, param2, param3, param4, param5, param6);
+    }
 
     *percent = convert_battery_to_percent(param1);
     return 0;
@@ -258,15 +279,21 @@ int fm_get_shutter(int* microseconds) {
         return -2;
     }
 
-    printf("fm_get_shutter: Starting with camera handle %p\n", (void*)g_hCamera);
+    if (verbose_logging) {
+        printf("fm_get_shutter: Starting with camera handle %p\n", (void*)g_hCamera);
+    }
 
     // Get shutter speed from camera (SDK returns microseconds)
     long speed_microseconds = 0;
     long bulb = 0;
-    printf("fm_get_shutter: Calling XSDK_GetShutterSpeed...\n");
+    if (verbose_logging) {
+        printf("fm_get_shutter: Calling XSDK_GetShutterSpeed...\n");
+    }
     long result = XSDK_GetShutterSpeed(g_hCamera, &speed_microseconds, &bulb);
-    printf("fm_get_shutter: XSDK_GetShutterSpeed returned %ld\n", result);
-    printf("fm_get_shutter: speed_microseconds = %ld, bulb = %ld\n", speed_microseconds, bulb);
+    if (verbose_logging) {
+        printf("fm_get_shutter: XSDK_GetShutterSpeed returned %ld\n", result);
+        printf("fm_get_shutter: speed_microseconds = %ld, bulb = %ld\n", speed_microseconds, bulb);
+    }
 
     if (result != 0) {
         fprintf(stderr, "fm_get_shutter: XSDK_GetShutterSpeed failed with code: %ld\n", result);
@@ -276,10 +303,11 @@ int fm_get_shutter(int* microseconds) {
 
     // Return microseconds directly (SDK units)
     *microseconds = (int)speed_microseconds;
-    printf("fm_get_shutter: Setting *microseconds = %d (from %ld)\n", *microseconds, speed_microseconds);
-
-    printf("Current shutter speed: %d microseconds (%.6f seconds, bulb=%ld)\n",
-           *microseconds, (double)speed_microseconds / 1000000.0, bulb);
+    if (verbose_logging) {
+        printf("fm_get_shutter: Setting *microseconds = %d (from %ld)\n", *microseconds, speed_microseconds);
+        printf("Current shutter speed: %d microseconds (%.6f seconds, bulb=%ld)\n",
+               *microseconds, (double)speed_microseconds / 1000000.0, bulb);
+    }
     return 0;
 }
 
@@ -375,14 +403,18 @@ int fm_set_exposure_mode(int mode) {
     }
 
     // Tethered control requires Manual exposure mode for full control
-    printf("Setting Manual exposure mode for tethered control...\n");
+    if (verbose_logging) {
+        printf("Setting Manual exposure mode for tethered control...\n");
+    }
     long result = XSDK_SetAEMode(g_hCamera, 0x0001); // Always Manual mode
     if (result != 0) {
         fprintf(stderr, "fm_set_exposure_mode: Failed to set Manual exposure mode: %ld\n", result);
         return -3;
     }
 
-    printf("Manual exposure mode set successfully\n");
+    if (verbose_logging) {
+        printf("Manual exposure mode set successfully\n");
+    }
     return 0;
 }
 
@@ -405,7 +437,9 @@ int fm_get_exposure_mode(int* mode) {
     }
 
     *mode = (int)currentMode;
-    printf("Current exposure mode: 0x%04X\n", *mode);
+    if (verbose_logging) {
+        printf("Current exposure mode: 0x%04X\n", *mode);
+    }
     return 0;
 }
 
@@ -429,7 +463,9 @@ int fm_get_iso(int* iso) {
     }
 
     *iso = (int)iso_value;
-    printf("Current ISO: %d\n", *iso);
+    if (verbose_logging) {
+        printf("Current ISO: %d\n", *iso);
+    }
     return 0;
 }
 
@@ -470,7 +506,9 @@ int fm_capture() {
 
     long shot_opt = 0;
     long af_status = 0;
-    printf("Triggering shutter release (mode: 0x%04X)...\n", XSDK_RELEASE_SHOOT_S1OFF);
+    if (verbose_logging) {
+        printf("Triggering shutter release (mode: 0x%04X)...\n", XSDK_RELEASE_SHOOT_S1OFF);
+    }
     long result = XSDK_Release(g_hCamera, XSDK_RELEASE_SHOOT_S1OFF, &shot_opt, &af_status);
 
     if (result != XSDK_COMPLETE) {
@@ -497,7 +535,9 @@ int fm_capture() {
         return -2;
     }
 
-    printf("Capture triggered successfully (AF status: %ld, shot_opt: %ld)\n", af_status, shot_opt);
+    if (verbose_logging) {
+        printf("Capture triggered successfully (AF status: %ld, shot_opt: %ld)\n", af_status, shot_opt);
+    }
 
     // Wait for image to appear in buffer
     // SDK manual: "poll the camera buffer by XSDK_GetBufferCapacity() or XSDK_ReadImageInfo()"
@@ -505,11 +545,15 @@ int fm_capture() {
     long total_frames = 0;
     int attempts = 0;
 
-    printf("Waiting for image to be written to camera buffer...\n");
+    if (verbose_logging) {
+        printf("Waiting for image to be written to camera buffer...\n");
+    }
     while (attempts < 100) {  // Max 10 seconds
         XSDK_GetBufferCapacity(g_hCamera, &shoot_frames, &total_frames);
         if (shoot_frames > 0) {
-            printf("Image available in buffer after %d ms (%ld frames)\n", attempts * 100, shoot_frames);
+            if (verbose_logging) {
+                printf("Image available in buffer after %d ms (%ld frames)\n", attempts * 100, shoot_frames);
+            }
             break;  // Image is ready
         }
 #ifdef _WIN32
@@ -616,7 +660,9 @@ int fm_get_supported_shutter_count(int* count) {
         return -2;
     }
 
-    printf("Getting supported shutter speed count...\n");
+    if (verbose_logging) {
+        printf("Getting supported shutter speed count...\n");
+    }
     long num_speeds = 0;
     long bulb_capable = 0;
     long result = XSDK_CapShutterSpeed(g_hCamera, &num_speeds, NULL, &bulb_capable);
@@ -626,7 +672,9 @@ int fm_get_supported_shutter_count(int* count) {
     }
 
     *count = (int)num_speeds;
-    printf("Camera supports %ld shutter speeds (bulb capable: %ld)\n", num_speeds, bulb_capable);
+    if (verbose_logging) {
+        printf("Camera supports %ld shutter speeds (bulb capable: %ld)\n", num_speeds, bulb_capable);
+    }
 
     if (num_speeds == 0) {
         fprintf(stderr, "WARNING: No supported shutter speeds found\n");
@@ -685,12 +733,22 @@ int fm_get_supported_shutter_speeds(int* count, int* speeds) {
         speeds[i] = (int)valid_speeds[i];
     }
 
-    printf("Supported shutter speeds (%ld values):\n", num_speeds);
-    for (long i = 0; i < num_speeds; i++) {
-        double seconds = (double)valid_speeds[i] / 1000000.0;
-        printf("  %2ld: %7d μs (%.6f seconds)\n", i + 1, valid_speeds[i], seconds);
+    if (verbose_logging) {
+        printf("Supported shutter speeds (%ld values):\n", num_speeds);
+        for (long i = 0; i < num_speeds; i++) {
+            double seconds = (double)valid_speeds[i] / 1000000.0;
+            printf("  %2ld: %7d μs (%.6f seconds)\n", i + 1, valid_speeds[i], seconds);
+        }
     }
 
     free(valid_speeds);
+    return 0;
+}
+
+int fm_set_verbose(int enabled) {
+    verbose_logging = enabled;
+    if (verbose_logging) {
+        printf("Verbose logging enabled\n");
+    }
     return 0;
 }

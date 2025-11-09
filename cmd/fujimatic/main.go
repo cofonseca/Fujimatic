@@ -40,6 +40,7 @@ func NewShell(camera hal.Camera) *Shell {
 func main() {
 	// Parse command line flags
 	fakeCamera := flag.Bool("fake-camera", false, "Use fake camera for testing/debugging (default: use real camera)")
+	verbose := flag.Bool("verbose", false, "Enable verbose logging (shows detailed SDK debug output)")
 	flag.Parse()
 
 	var camera hal.Camera
@@ -78,6 +79,14 @@ func main() {
 		}
 
 		fmt.Println("SDK initialized successfully")
+
+		// Configure verbose logging if requested
+		if *verbose {
+			if err := hal.SetVerbose(true); err != nil {
+				fmt.Printf("Warning: Failed to enable verbose logging: %v\n", err)
+			}
+		}
+
 		camera = hal.NewDefaultCamera()
 	}
 

@@ -9,3 +9,9 @@ func InitSDK(sdkPath string) (InitResult, error) {
 	// No actual SDK initialization needed for fake camera
 	return InitSuccess, nil
 }
+
+// SetVerbose is a no-op for fake camera mode
+func SetVerbose(enabled bool) error {
+	// Fake camera has no SDK layer to configure
+	return nil
+}
