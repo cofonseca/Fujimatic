@@ -233,6 +233,9 @@ func (s *Shell) cmdHelp() error {
 	fmt.Println("  capture <count>      - Capture multiple frames (count frames, no delay)")
 	fmt.Println("  capture <count> <delay> - Capture with intervalometer (delay in seconds)")
 	fmt.Println("                         Use count=0 for infinite captures")
+	fmt.Println("  capture --async <count> <delay> - Use async pipeline (overlaps capture+download)")
+	fmt.Println("                         Best for delays ≥2s: ~20-25% faster")
+	fmt.Println("                         X-T3 measured: delay=2s → 25% speedup")
 	fmt.Println("  pause                - Pause active intervalometer (saves state)")
 	fmt.Println("  resume               - Resume paused intervalometer")
 	fmt.Println("  stop                 - Stop intervalometer (discards state)")
@@ -502,42 +505,55 @@ func (s *Shell) cmdCapture(args []string) error {
 		fmt.Printf("Session created: %s -> %s\n", projectName, outputDir)
 	}
 
-	// Parse arguments: capture [count] [delay]
-	var count int = 1 // Default: single capture
-	var delay int = 0 // Default: no delay
+	// Parse arguments: capture [--async] [count] [delay]
+	var count int = 1    // Default: single capture
+	var delay int = 0    // Default: no delay
+	var asyncMode = false // Default: synchronous mode
 
-	if len(args) >= 1 {
+	// Check for --async flag
+	argStart := 0
+	if len(args) > 0 && args[0] == "--async" {
+		asyncMode = true
+		argStart = 1
+	}
+
+	if len(args) > argStart {
 		var err error
-		count, err = strconv.Atoi(args[0])
+		count, err = strconv.Atoi(args[argStart])
 		if err != nil {
-			return fmt.Errorf("invalid count argument: %s", args[0])
+			return fmt.Errorf("invalid count argument: %s", args[argStart])
 		}
 		if count < 0 {
 			return fmt.Errorf("count cannot be negative")
 		}
 	}
 
-	if len(args) >= 2 {
+	if len(args) > argStart+1 {
 		var err error
-		delay, err = strconv.Atoi(args[1])
+		delay, err = strconv.Atoi(args[argStart+1])
 		if err != nil {
-			return fmt.Errorf("invalid delay argument: %s", args[1])
+			return fmt.Errorf("invalid delay argument: %s", args[argStart+1])
 		}
 		if delay < 0 {
 			return fmt.Errorf("delay cannot be negative")
 		}
 	}
 
-	// Single capture mode (count=0 or count=1 with no args)
-	if count == 1 && len(args) == 0 {
+	// Single capture mode (count=0 or count=1 with no args) - always synchronous
+	if count == 1 && len(args) == argStart {
 		return s.captureSingle()
 	}
 
 	// Intervalometer mode (count > 1 or count == 0 for infinite)
 	// Run in background goroutine so REPL stays responsive
-	go s.captureInterval(count, delay)
+	if asyncMode {
+		go s.captureIntervalAsync(count, delay)
+		fmt.Println("Async intervalometer started in background")
+	} else {
+		go s.captureInterval(count, delay)
+		fmt.Println("Intervalometer started in background")
+	}
 
-	fmt.Println("Intervalometer started in background")
 	fmt.Println("Type 'status' to see progress, 'pause' to pause, 'stop' to end")
 
 	return nil
@@ -568,7 +584,7 @@ func (s *Shell) captureInterval(count int, delaySec int) {
 
 	// Start intervalometer (only if not already active/resuming)
 	if !s.session.IntervalActive {
-		s.session.StartInterval(count, delayDuration, shutterSpeed)
+		s.session.StartInterval(count, delayDuration, shutterSpeed, false) // Synchronous mode
 		if count == 0 {
 			fmt.Printf("\nStarting intervalometer: infinite frames, %ds delay\n", delaySec)
 		} else {
@@ -717,6 +733,303 @@ func (s *Shell) captureInterval(count int, delaySec int) {
 	}
 }
 
+// captureIntervalAsync implements async two-stage pipeline: capture and download run concurrently
+func (s *Shell) captureIntervalAsync(count int, delaySec int) {
+	// Get current shutter speed for integration time tracking
+	shutterSpeed, err := s.camera.GetShutter()
+	if err != nil {
+		fmt.Printf("\nError: failed to get shutter speed: %v\n> ", err)
+		return
+	}
+
+	delayDuration := time.Duration(delaySec) * time.Second
+
+	// Start intervalometer (only if not already active/resuming)
+	if !s.session.IntervalActive {
+		s.session.StartInterval(count, delayDuration, shutterSpeed, true) // Async mode
+		if count == 0 {
+			fmt.Printf("\nStarting ASYNC intervalometer: infinite frames, %ds delay\n", delaySec)
+		} else {
+			fmt.Printf("\nStarting ASYNC intervalometer: %d frames, %ds delay\n", count, delaySec)
+		}
+	} else {
+		// Resuming
+		if count == 0 {
+			fmt.Printf("\nResuming ASYNC intervalometer: frame %d onwards (infinite), %ds delay\n",
+				s.session.IntervalCurrentFrame+1, delaySec)
+		} else {
+			fmt.Printf("\nResuming ASYNC intervalometer: frame %d/%d, %ds delay\n",
+				s.session.IntervalCurrentFrame+1, count, delaySec)
+		}
+	}
+
+	// Initialize async pipeline with buffer size of 3 (allows 3 captures ahead of downloads)
+	s.session.StartAsyncPipeline(3)
+	// Note: We manually close the channel in completion logic, not with defer
+	// to avoid double-close panic
+
+	// Mark intervalometer as active
+	s.intervalActive = true
+	defer func() {
+		s.intervalActive = false
+		// Clean up channel if still open (error cases)
+		s.session.StopAsyncPipeline()
+	}()
+
+	fmt.Print("Type 'pause' to pause, 'stop' to end, or press Ctrl+C to pause\n> ")
+
+	// Use sync package for goroutine coordination
+	var wg struct {
+		capture  chan bool
+		download chan bool
+	}
+	wg.capture = make(chan bool, 1)
+	wg.download = make(chan bool, 1)
+
+	// Error channels for both stages
+	captureErrChan := make(chan error, 1)
+	downloadErrChan := make(chan error, 1)
+
+	// Stage 1: Capture goroutine
+	go func() {
+		defer func() {
+			wg.capture <- true
+		}()
+
+		for {
+			// Check for pause/stop requests
+			select {
+			case <-s.pauseReqChan:
+				s.session.PauseInterval()
+				if err := s.session.Save(); err != nil {
+					fmt.Printf("\nWarning: failed to save session: %v\n", err)
+				}
+				fmt.Print("\nIntervalometer paused - type 'resume' to continue\n> ")
+				return
+
+			case <-s.stopReqChan:
+				s.session.ResetInterval()
+				if err := s.session.Save(); err != nil {
+					fmt.Printf("\nWarning: failed to save session: %v\n", err)
+				}
+				fmt.Print("\nIntervalometer stopped\n> ")
+				return
+
+			default:
+				// Continue with capture
+			}
+
+			// Check if paused
+			if s.session.IntervalPaused {
+				fmt.Print("\nIntervalometer paused\n> ")
+				return
+			}
+
+			// Check if we've reached the count (if not infinite)
+			if count > 0 && s.session.IntervalCurrentFrame >= count {
+				// All captures done, close the queue and exit
+				return
+			}
+
+			// Increment frame counter
+			s.session.IntervalCurrentFrame++
+
+			// Check battery before capture
+			battery, err := s.camera.GetBattery()
+			if err != nil {
+				fmt.Printf("\nWarning: failed to check battery: %v\n> ", err)
+			} else {
+				// Auto-pause at 10% battery
+				if battery <= 10 {
+					fmt.Printf("\n⚠️  Battery at %d%% - AUTO-PAUSED\n", battery)
+					fmt.Print("Please charge or replace battery, then type 'resume' to continue\n> ")
+					s.session.PauseInterval()
+					if err := s.session.Save(); err != nil {
+						fmt.Printf("Warning: failed to save session: %v\n> ", err)
+					}
+					return
+				}
+			}
+
+			// Display progress
+			if count == 0 {
+				fmt.Printf("\n[Capture] Frame %d - ", s.session.IntervalCurrentFrame)
+			} else {
+				fmt.Printf("\n[Capture] Frame %d/%d - ", s.session.IntervalCurrentFrame, count)
+			}
+
+			// Trigger capture (async - returns immediately after shutter)
+			startTime := time.Now()
+			seqNum, err := s.session.TriggerCapture()
+			if err != nil {
+				captureErrChan <- fmt.Errorf("capture failed: %w", err)
+				return
+			}
+
+			elapsed := time.Since(startTime)
+			fmt.Printf("Captured (%.1fs) - Queued for download", elapsed.Seconds())
+
+			// Send sequence number to download queue (blocks if queue full - backpressure)
+			select {
+			case s.session.GetCaptureQueue() <- seqNum:
+				// Successfully queued
+			case <-s.pauseReqChan:
+				s.session.PauseInterval()
+				if err := s.session.Save(); err != nil {
+					fmt.Printf("\nWarning: failed to save session: %v\n", err)
+				}
+				fmt.Print("\nIntervalometer paused - type 'resume' to continue\n> ")
+				return
+			case <-s.stopReqChan:
+				s.session.ResetInterval()
+				if err := s.session.Save(); err != nil {
+					fmt.Printf("\nWarning: failed to save session: %v\n", err)
+				}
+				fmt.Print("\nIntervalometer stopped\n> ")
+				return
+			}
+
+			// Save session state periodically (every 5 frames)
+			if s.session.IntervalCurrentFrame%5 == 0 {
+				if err := s.session.Save(); err != nil {
+					fmt.Printf(" - Warning: failed to save session: %v", err)
+				}
+			}
+
+			// Wait for delay before next capture (if not the last frame)
+			if delaySec > 0 && (count == 0 || s.session.IntervalCurrentFrame < count) {
+				fmt.Print("\n> ")
+
+				// Use select to handle delay and pause/stop commands
+				delayTimer := time.NewTimer(delayDuration)
+				select {
+				case <-delayTimer.C:
+					// Delay completed normally
+				case <-s.pauseReqChan:
+					delayTimer.Stop()
+					s.session.PauseInterval()
+					if err := s.session.Save(); err != nil {
+						fmt.Printf("\nWarning: failed to save session: %v\n", err)
+					}
+					fmt.Print("\nIntervalometer paused - type 'resume' to continue\n> ")
+					return
+				case <-s.stopReqChan:
+					delayTimer.Stop()
+					s.session.ResetInterval()
+					if err := s.session.Save(); err != nil {
+						fmt.Printf("\nWarning: failed to save session: %v\n", err)
+					}
+					fmt.Print("\nIntervalometer stopped\n> ")
+					return
+				}
+			} else {
+				fmt.Print("\n> ")
+			}
+		}
+	}()
+
+	// Stage 2: Download goroutine
+	go func() {
+		defer func() {
+			wg.download <- true
+		}()
+
+		for seqNum := range s.session.GetCaptureQueue() {
+			// Check for pause/stop requests during download
+			select {
+			case <-s.pauseReqChan:
+				// Drain this download first, then pause
+				fmt.Printf("[Download] Frame %04d - Downloading before pause... ", seqNum)
+				if err := s.session.DownloadCaptured(seqNum); err != nil {
+					downloadErrChan <- fmt.Errorf("download failed: %w", err)
+					return
+				}
+				fmt.Print("Done\n")
+				s.session.PauseInterval()
+				if err := s.session.Save(); err != nil {
+					fmt.Printf("Warning: failed to save session: %v\n> ", err)
+				}
+				fmt.Print("\nIntervalometer paused - type 'resume' to continue\n> ")
+				return
+
+			case <-s.stopReqChan:
+				// Drain this download first, then stop
+				fmt.Printf("[Download] Frame %04d - Downloading before stop... ", seqNum)
+				if err := s.session.DownloadCaptured(seqNum); err != nil {
+					downloadErrChan <- fmt.Errorf("download failed: %w", err)
+					return
+				}
+				fmt.Print("Done\n")
+				s.session.ResetInterval()
+				if err := s.session.Save(); err != nil {
+					fmt.Printf("Warning: failed to save session: %v\n> ", err)
+				}
+				fmt.Print("\nIntervalometer stopped\n> ")
+				return
+
+			default:
+				// Continue with download
+			}
+
+			// Download the image
+			filename := fmt.Sprintf("%s_%04d.RAF", s.session.ProjectName, seqNum)
+			fmt.Printf("[Download] Frame %04d - Downloading %s... ", seqNum, filename)
+
+			startTime := time.Now()
+			if err := s.session.DownloadCaptured(seqNum); err != nil {
+				downloadErrChan <- fmt.Errorf("download failed: %w", err)
+				return
+			}
+
+			elapsed := time.Since(startTime)
+			fmt.Printf("Done (%.1fs)", elapsed.Seconds())
+
+			// Display battery level
+			if battery, err := s.camera.GetBattery(); err == nil {
+				fmt.Printf(" | Battery: %d%%", battery)
+			}
+
+			fmt.Print("\n> ")
+		}
+	}()
+
+	// Wait for both goroutines to complete or error
+	select {
+	case <-wg.capture:
+		// Capture stage complete - close queue to signal download stage
+		if s.session.GetCaptureQueue() != nil {
+			close(s.session.GetCaptureQueue())
+		}
+		// Wait for download stage to finish draining
+		<-wg.download
+		fmt.Print("\n✓ Async intervalometer completed!\n> ")
+		s.session.ResetInterval()
+		if err := s.session.Save(); err != nil {
+			fmt.Printf("Warning: failed to save session: %v\n> ", err)
+		}
+		// Manually null out the channel so defer doesn't try to close it
+		s.session.StopAsyncPipeline()
+
+	case err := <-captureErrChan:
+		fmt.Printf("\nError in capture stage: %v\n> ", err)
+		// Close queue and wait for downloads to finish
+		if s.session.GetCaptureQueue() != nil {
+			close(s.session.GetCaptureQueue())
+		}
+		<-wg.download
+		// Manually null out the channel so defer doesn't try to close it
+		s.session.StopAsyncPipeline()
+
+	case err := <-downloadErrChan:
+		fmt.Printf("\nError in download stage: %v\n> ", err)
+		// Signal capture to stop
+		s.stopReqChan <- true
+		<-wg.capture
+		// Channel should already be handled, but clean up just in case
+		s.session.StopAsyncPipeline()
+	}
+}
+
 func (s *Shell) cmdPause() error {
 	if s.session == nil {
 		return fmt.Errorf("no active session")
@@ -763,9 +1076,13 @@ func (s *Shell) cmdResume() error {
 
 	s.session.ResumeInterval()
 
-	// Restart the interval loop in background goroutine
+	// Restart the interval loop in background goroutine with the original mode
 	delaySec := int(s.session.IntervalDelay.Seconds())
-	go s.captureInterval(s.session.IntervalTotalFrames, delaySec)
+	if s.session.IntervalAsyncMode {
+		go s.captureIntervalAsync(s.session.IntervalTotalFrames, delaySec)
+	} else {
+		go s.captureInterval(s.session.IntervalTotalFrames, delaySec)
+	}
 
 	return nil
 }

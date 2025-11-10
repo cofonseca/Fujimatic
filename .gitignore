@@ -45,14 +45,18 @@ libs/macOS/*.dylib
 
 # Entire SDK directory (proprietary content)
 sdk/
+sdk/MANUAL/
+
+# PDFs (SDK documentation)
+*.pdf
 
 # Session and config files
 *.json
 *.yaml
 *.yml
 # Ignore all other markdown files (keep README.md only)
-CLAUDE.md
-STORIES.md
+#CLAUDE.md
+#STORIES.md
 
 # Build artifacts
 *.o
@@ -64,9 +68,6 @@ STORIES.md
 *.temp
 tmp/
 temp/
-
-# PDFs (SDK documentation)
-*.pdf
 
 # RAW image files
 *.RAF

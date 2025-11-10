@@ -26,6 +26,10 @@ type Session struct {
 	IntervalPaused      bool          `json:"interval_paused"`
 	IntervalStartTime   time.Time     `json:"interval_start_time"`
 	LastShutterSpeed    int           `json:"last_shutter_speed"`    // In microseconds, for integration time calculation
+	IntervalAsyncMode   bool          `json:"interval_async_mode"`   // Track if using async pipeline
+
+	// Async pipeline state (not persisted to JSON)
+	captureQueue chan int // Buffered channel for sequence numbers waiting to be downloaded
 }
 
 // New creates a new capture session
@@ -196,7 +200,7 @@ func (s *Session) ResetInterval() {
 }
 
 // StartInterval initializes the intervalometer state
-func (s *Session) StartInterval(totalFrames int, delay time.Duration, shutterSpeed int) {
+func (s *Session) StartInterval(totalFrames int, delay time.Duration, shutterSpeed int, asyncMode bool) {
 	s.IntervalActive = true
 	s.IntervalTotalFrames = totalFrames
 	s.IntervalCurrentFrame = 0
@@ -204,6 +208,7 @@ func (s *Session) StartInterval(totalFrames int, delay time.Duration, shutterSpe
 	s.IntervalPaused = false
 	s.IntervalStartTime = time.Now()
 	s.LastShutterSpeed = shutterSpeed
+	s.IntervalAsyncMode = asyncMode
 }
 
 // PauseInterval pauses the intervalometer
@@ -214,4 +219,78 @@ func (s *Session) PauseInterval() {
 // ResumeInterval resumes the intervalometer
 func (s *Session) ResumeInterval() {
 	s.IntervalPaused = false
+}
+
+// StartAsyncPipeline initializes the capture queue channel for async pipeline mode
+// bufferSize controls how many captures can queue ahead of downloads (2-3 recommended)
+func (s *Session) StartAsyncPipeline(bufferSize int) {
+	if bufferSize < 1 {
+		bufferSize = 2 // Default: allow 2 captures ahead
+	}
+	s.captureQueue = make(chan int, bufferSize)
+}
+
+// StopAsyncPipeline closes the capture queue channel if it's still open
+// Safe to call multiple times - recovers from panic if already closed
+func (s *Session) StopAsyncPipeline() {
+	if s.captureQueue != nil {
+		defer func() {
+			// Recover from panic if channel is already closed
+			recover()
+		}()
+		close(s.captureQueue)
+		s.captureQueue = nil
+	}
+}
+
+// GetCaptureQueue returns the capture queue channel for async pipeline coordination
+func (s *Session) GetCaptureQueue() chan int {
+	return s.captureQueue
+}
+
+// TriggerCapture triggers the camera shutter only (no download)
+// Returns the sequence number that was captured for later download
+func (s *Session) TriggerCapture() (int, error) {
+	if !s.camera.IsConnected() {
+		return 0, fmt.Errorf("camera not connected")
+	}
+
+	// Ensure output directory exists
+	if err := os.MkdirAll(s.OutputDir, 0755); err != nil {
+		return 0, fmt.Errorf("failed to create output directory: %w", err)
+	}
+
+	// Check for file collision and skip to next available sequence number
+	filePath := s.GetNextFilePath()
+	for fileExists(filePath) {
+		s.SequenceNumber++
+		filePath = s.GetNextFilePath()
+	}
+
+	// Allocate sequence number BEFORE capture (maintains chronological order)
+	capturedSeqNum := s.SequenceNumber
+	s.SequenceNumber++
+
+	// Trigger camera capture only
+	if err := s.camera.Capture(); err != nil {
+		return 0, fmt.Errorf("capture failed: %w", err)
+	}
+
+	return capturedSeqNum, nil
+}
+
+// DownloadCaptured downloads a previously captured image by sequence number
+func (s *Session) DownloadCaptured(seqNum int) error {
+	if !s.camera.IsConnected() {
+		return fmt.Errorf("camera not connected")
+	}
+
+	filename := fmt.Sprintf("%s_%04d.RAF", s.ProjectName, seqNum)
+
+	// Download the captured image
+	if err := s.camera.DownloadLast(s.OutputDir, filename); err != nil {
+		return fmt.Errorf("download failed: %w", err)
+	}
+
+	return nil
 }

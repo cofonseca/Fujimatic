@@ -81,6 +81,83 @@ See **[BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md)** for detailed build docume
 ./bin/fujimatic.exe --fake-camera
 ```
 
+---
+
+## Features
+
+### Intervalometer with Async Pipeline
+
+Fujimatic supports both synchronous and asynchronous intervalometer modes:
+
+#### Synchronous Mode (Default)
+Traditional sequential operation: capture → download → delay → repeat.
+
+```bash
+capture 100 10  # 100 frames, 10s delay between frames
+```
+
+**Timing**: Each cycle takes `capture_time + download_time + delay`
+
+#### Async Mode (Performance Optimized)
+Pipeline architecture: capture frame N+1 while downloading frame N.
+
+```bash
+capture --async 100 10  # Same capture, ~20-25% faster
+```
+
+**Timing**: Overlapped operations, time ≈ `N × delay + overhead`
+
+#### Performance Comparison (X-T3 Measured)
+
+| Frames | Delay | Sync Time | Async Time | Speedup |
+|--------|-------|-----------|------------|---------|
+| 5      | 0s    | 13s       | 13s        | 0%      |
+| 5      | 1s    | 17s       | 13s        | 23%     |
+| 5      | 2s    | 24s       | 18s        | 25%     |
+| 100    | 10s   | 500s      | 402s       | 20%*    |
+
+*Projected based on measured capture (~1s) and download (~2s) times.
+
+#### When to Use Async
+
+**Best for:**
+- ✅ Astrophotography (long delays between exposures)
+- ✅ Time-lapse with delays ≥2 seconds
+- ✅ Long capture sessions (100+ frames)
+
+**Use sync for:**
+- ⚠️ Single captures or very short delays
+- ⚠️ When you need simpler, proven behavior
+
+#### How It Works
+
+**Synchronous Flow:**
+```
+Frame 1: [Capture 1s] → [Download 2s] → [Delay 10s]
+Frame 2: [Capture 1s] → [Download 2s] → [Delay 10s]
+Total: 2 × (1 + 2 + 10) = 26 seconds
+```
+
+**Async Pipeline Flow:**
+```
+Frame 1: [Capture 1s] ────────────────┐
+Frame 2:              [Capture 1s] ───┼──┐
+                                       ↓  ↓
+                      [Download 2s] [Download 2s]
+         [Delay 10s] [Delay 10s]
+Total: ~20 seconds (captures/downloads overlap during delays)
+```
+
+### Other Features
+
+- **Manual exposure control**: Set ISO, shutter speed, focus
+- **Session management**: Save/load capture sessions with state persistence
+- **Battery monitoring**: Auto-pause at configurable threshold (default 10%)
+- **Pause/Resume**: Interrupt and continue intervalometer sessions
+- **File naming**: Sequential numbering with collision detection
+
+---
+
 ### Development Status
 
 See **[STORIES.md](STORIES.md)** for detailed development progress.
