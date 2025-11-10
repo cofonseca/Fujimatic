@@ -50,7 +50,9 @@ int fm_init(const char* sdk_path) {
 
 #ifdef _WIN32
     // Load XAPI.dll from current directory (where all SDK DLLs should be)
-    printf("Loading XAPI.dll from current directory...\n");
+    if (verbose_logging) {
+        printf("Loading XAPI.dll from current directory...\n");
+    }
     g_hLib = LoadLibraryA("XAPI.dll");
     if (g_hLib == NULL) {
         DWORD error = GetLastError();
@@ -58,17 +60,23 @@ int fm_init(const char* sdk_path) {
         fprintf(stderr, "  Make sure XAPI.dll and all FF*.dll files are in the same directory as the executable\n");
         return -2;
     }
-    printf("XAPI.dll loaded successfully\n");
+    if (verbose_logging) {
+        printf("XAPI.dll loaded successfully\n");
+    }
 #else
     // On Linux, load libFXAPI.so from current directory
-    printf("Loading libFXAPI.so from current directory...\n");
+    if (verbose_logging) {
+        printf("Loading libFXAPI.so from current directory...\n");
+    }
     g_hLib = dlopen("./libFXAPI.so", RTLD_NOW);
     if (g_hLib == NULL) {
         fprintf(stderr, "fm_init: Failed to load libFXAPI.so: %s\n", dlerror());
         fprintf(stderr, "  Make sure libFXAPI.so is in the current directory\n");
         return -2;
     }
-    printf("libFXAPI.so loaded successfully\n");
+    if (verbose_logging) {
+        printf("libFXAPI.so loaded successfully\n");
+    }
 #endif
 
     // Initialize the SDK
@@ -130,8 +138,7 @@ int fm_connect() {
         fprintf(stderr, "  Possible issues:\n");
         fprintf(stderr, "  - Camera not powered on\n");
         fprintf(stderr, "  - USB cable not connected\n");
-        fprintf(stderr, "  - Camera in wrong USB mode (try PC AUTO SAVE or MTP mode)\n");
-        fprintf(stderr, "  - USB drivers not installed (install Fujifilm X Acquire or MyFinePix Studio)\n");
+        fprintf(stderr, "  - Camera in wrong USB connection mode (try USB TETHER AUTO)\n");
         return -4;
     }
 

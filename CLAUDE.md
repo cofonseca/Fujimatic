@@ -19,6 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 2. Ask the user what to work on next
 3. Wait for explicit approval before implementing new features
 4. Do not assume the next step - always confirm with the user
+5. If you need to create temp files/folders for testing purposes, clean up after yourself at the end
 
 ## Architecture & Code Organization
 

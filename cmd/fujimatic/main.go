@@ -82,7 +82,16 @@ func main() {
 			os.Exit(1)
 		}
 
-		fmt.Printf("Initializing Fujifilm SDK from: %s\n", sdkPath)
+		// Configure verbose logging BEFORE SDK initialization to control C wrapper messages
+		if *verbose {
+			if err := hal.SetVerbose(true); err != nil {
+				fmt.Printf("Warning: Failed to enable verbose logging: %v\n", err)
+			}
+		}
+
+		if *verbose {
+			fmt.Printf("Initializing Fujifilm SDK from: %s\n", sdkPath)
+		}
 		result, err := hal.InitSDK(sdkPath)
 		if err != nil {
 			fmt.Printf("Error: Failed to initialize SDK: %v\n", err)
@@ -98,13 +107,8 @@ func main() {
 			os.Exit(1)
 		}
 
-		fmt.Println("SDK initialized successfully")
-
-		// Configure verbose logging if requested
 		if *verbose {
-			if err := hal.SetVerbose(true); err != nil {
-				fmt.Printf("Warning: Failed to enable verbose logging: %v\n", err)
-			}
+			fmt.Println("SDK initialized successfully")
 		}
 
 		camera = hal.NewDefaultCamera()
@@ -1561,7 +1565,16 @@ func runNonInteractive(fakeCamera *bool, verbose *bool, iso *int, shutter *strin
 			return fmt.Errorf("FUJI_SDK_PATH environment variable not set - please set it to the Fujifilm SDK redistributables directory")
 		}
 
-		fmt.Printf("Initializing Fujifilm SDK from: %s\n", sdkPath)
+		// Configure verbose logging BEFORE SDK initialization to control C wrapper messages
+		if *verbose {
+			if err := hal.SetVerbose(true); err != nil {
+				fmt.Printf("Warning: Failed to enable verbose logging: %v\n", err)
+			}
+		}
+
+		if *verbose {
+			fmt.Printf("Initializing Fujifilm SDK from: %s\n", sdkPath)
+		}
 		result, err := hal.InitSDK(sdkPath)
 		if err != nil {
 			return fmt.Errorf("failed to initialize SDK: %w", err)
@@ -1571,13 +1584,8 @@ func runNonInteractive(fakeCamera *bool, verbose *bool, iso *int, shutter *strin
 			return fmt.Errorf("SDK initialization returned: %v", result)
 		}
 
-		fmt.Println("SDK initialized successfully")
-
-		// Configure verbose logging if requested
 		if *verbose {
-			if err := hal.SetVerbose(true); err != nil {
-				fmt.Printf("Warning: Failed to enable verbose logging: %v\n", err)
-			}
+			fmt.Println("SDK initialized successfully")
 		}
 
 		camera = hal.NewDefaultCamera()
