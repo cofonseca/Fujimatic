@@ -41,8 +41,27 @@ func main() {
 	// Parse command line flags
 	fakeCamera := flag.Bool("fake-camera", false, "Use fake camera for testing/debugging (default: use real camera)")
 	verbose := flag.Bool("verbose", false, "Enable verbose logging (shows detailed SDK debug output)")
+	
+	// Non-interactive mode flags
+	iso := flag.Int("iso", 0, "Set ISO value (e.g., --iso 800)")
+	shutter := flag.String("shutter", "", "Set shutter speed (e.g., --shutter 1/125, --shutter 10s)")
+	frames := flag.Int("frames", 0, "Number of frames to capture (required for capture)")
+	delay := flag.Int("delay", 0, "Delay between frames in seconds (optional, defaults to 0)")
+	output := flag.String("output", "", "Output directory for captures (optional, defaults to current directory)")
+	
 	flag.Parse()
 
+	// Check if non-interactive mode is requested
+	if *frames > 0 || *iso > 0 || *shutter != "" {
+		// Non-interactive mode
+		if err := runNonInteractive(fakeCamera, verbose, iso, shutter, frames, delay, output); err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Interactive mode (existing behavior)
 	var camera hal.Camera
 
 	if *fakeCamera {
@@ -1123,4 +1142,200 @@ func formatDuration(d time.Duration) string {
 	seconds := int(d.Seconds()) % 60
 
 	return fmt.Sprintf("%dh %dm %ds", hours, minutes, seconds)
+}
+
+// runNonInteractive executes the non-interactive mode with the specified parameters
+func runNonInteractive(fakeCamera *bool, verbose *bool, iso *int, shutter *string, frames *int, delay *int, output *string) error {
+	var camera hal.Camera
+
+	if *fakeCamera {
+		fmt.Println("Using fake camera (testing mode)")
+		camera = hal.NewFakeCamera()
+	} else {
+		// Initialize SDK for real camera
+		sdkPath := os.Getenv("FUJI_SDK_PATH")
+		if sdkPath == "" {
+			return fmt.Errorf("FUJI_SDK_PATH environment variable not set - please set it to the Fujifilm SDK redistributables directory")
+		}
+
+		fmt.Printf("Initializing Fujifilm SDK from: %s\n", sdkPath)
+		result, err := hal.InitSDK(sdkPath)
+		if err != nil {
+			return fmt.Errorf("failed to initialize SDK: %w", err)
+		}
+
+		if result != hal.InitSuccess {
+			return fmt.Errorf("SDK initialization returned: %v", result)
+		}
+
+		fmt.Println("SDK initialized successfully")
+
+		// Configure verbose logging if requested
+		if *verbose {
+			if err := hal.SetVerbose(true); err != nil {
+				fmt.Printf("Warning: Failed to enable verbose logging: %v\n", err)
+			}
+		}
+
+		camera = hal.NewDefaultCamera()
+	}
+
+	// Set up signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	defer func() {
+		// Disconnect camera when exiting
+		if camera.IsConnected() {
+			fmt.Println("Disconnecting from camera...")
+			if err := camera.Disconnect(); err != nil {
+				fmt.Printf("Warning: failed to disconnect: %v\n", err)
+			}
+		}
+	}()
+
+	// Auto-connect to camera
+	fmt.Println("Connecting to camera...")
+	if err := camera.Connect(); err != nil {
+		return fmt.Errorf("failed to connect to camera: %w", err)
+	}
+	fmt.Println("✅ Connected to camera successfully")
+	defer func() {
+		if camera.IsConnected() {
+			fmt.Println("Disconnecting from camera...")
+			if err := camera.Disconnect(); err != nil {
+				fmt.Printf("Warning: failed to disconnect: %v\n", err)
+			}
+		}
+	}()
+
+	// Apply settings if specified
+	if *iso > 0 {
+		fmt.Printf("Setting ISO to %d... ", *iso)
+		if err := camera.SetISO(*iso); err != nil {
+			return fmt.Errorf("failed to set ISO: %w", err)
+		}
+		fmt.Println("✅")
+	}
+
+	if *shutter != "" {
+		fmt.Printf("Setting shutter to %s... ", *shutter)
+		shutterSeconds, err := parseShutterDuration(*shutter)
+		if err != nil {
+			return fmt.Errorf("invalid shutter duration: %w", err)
+		}
+
+		// Get supported shutter speeds and find closest match
+		supportedSpeeds, err := camera.GetSupportedShutterSpeeds()
+		if err != nil {
+			return fmt.Errorf("failed to get supported shutter speeds: %w", err)
+		}
+
+		if len(supportedSpeeds) == 0 {
+			return fmt.Errorf("no supported shutter speeds found - camera may not be in Manual mode")
+		}
+
+		requestedMicroseconds := int(shutterSeconds * 1000000)
+		closestSpeed := findClosestShutterSpeed(requestedMicroseconds, supportedSpeeds)
+		
+		if err := camera.SetShutter(closestSpeed); err != nil {
+			return fmt.Errorf("failed to set shutter: %w", err)
+		}
+		
+		actualSeconds := float64(closestSpeed) / 1000000.0
+		actualFraction := getPhotographicFraction(actualSeconds)
+		fmt.Printf("✅ (%.6f seconds", actualSeconds)
+		if actualFraction != "" {
+			fmt.Printf(" = %s", actualFraction)
+		}
+		fmt.Println(")")
+	}
+
+	// Check if capture is requested
+	if *frames > 0 {
+		// Create session for capture
+		projectName := "noninteractive_capture"
+		var outputDir string
+		if *output != "" {
+			outputDir = *output
+		} else {
+			outputDir = ".\\captures"
+		}
+
+		// Expand ~ to home directory if present
+		if strings.HasPrefix(outputDir, "~") {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("failed to get home directory: %w", err)
+			}
+			outputDir = filepath.Join(home, outputDir[1:])
+		}
+
+		session, err := session.New(projectName, outputDir, camera)
+		if err != nil {
+			return fmt.Errorf("failed to create session: %w", err)
+		}
+
+		fmt.Printf("Starting capture: %d frames", *frames)
+		if *delay > 0 {
+			fmt.Printf(" with %d second delay between frames", *delay)
+		}
+		fmt.Printf(" to %s\n", outputDir)
+
+		// Capture frames
+		for i := 1; i <= *frames; i++ {
+			// Check for interrupt signal
+			select {
+			case <-sigChan:
+				fmt.Println("\n⚠️  Interrupt received - stopping capture")
+				return nil
+			default:
+			}
+
+			// Check battery level
+			battery, err := camera.GetBattery()
+			if err != nil {
+				fmt.Printf("Warning: failed to check battery: %v\n", err)
+			} else if battery <= 10 {
+				fmt.Printf("\n⚠️  Battery at %d%% - stopping capture to protect battery\n", battery)
+				return nil
+			}
+
+			// Display progress
+			fmt.Printf("Frame %d/%d - ", i, *frames)
+			
+			// Capture frame
+			startTime := time.Now()
+			filename := session.GetNextFilename()
+			fmt.Printf("Capturing %s... ", filename)
+
+			if err := session.Capture(); err != nil {
+				return fmt.Errorf("capture failed on frame %d: %w", i, err)
+			}
+
+			elapsed := time.Since(startTime)
+			fmt.Printf("Done (%.1fs)", elapsed.Seconds())
+
+			// Show battery level
+			if battery, err := camera.GetBattery(); err == nil {
+				fmt.Printf(" | Battery: %d%%", battery)
+			}
+
+			fmt.Println()
+
+			// Wait for delay if not the last frame
+			if i < *frames && *delay > 0 {
+				fmt.Printf("Waiting %d seconds... ", *delay)
+				time.Sleep(time.Duration(*delay) * time.Second)
+				fmt.Println("Done")
+			}
+		}
+
+		fmt.Printf("✅ Capture complete: %d frames saved to %s\n", *frames, outputDir)
+		return nil
+	}
+
+	// If no frames specified, just show status
+	fmt.Println("Non-interactive mode completed with settings applied")
+	fmt.Println("Use --frames to start a capture session")
+	return nil
 }
