@@ -258,6 +258,94 @@ func (c *Camera) SetISO(iso int) error {
 	return fmt.Errorf("failed to set ISO, code: %d", result)
 }
 
+// FocusMode represents camera focus modes
+type FocusMode int
+
+const (
+	FocusModeManual FocusMode = 0x0001 // Manual focus
+	FocusModeAFS    FocusMode = 0x8001 // AF-S (single-shot autofocus)
+	FocusModeAFC    FocusMode = 0x8002 // AF-C (continuous autofocus)
+)
+
+func (f FocusMode) String() string {
+	switch f {
+	case FocusModeManual:
+		return "Manual"
+	case FocusModeAFS:
+		return "AF-S"
+	case FocusModeAFC:
+		return "AF-C"
+	default:
+		return "Unknown"
+	}
+}
+
+// GetFocusMode returns the current focus mode
+func (c *Camera) GetFocusMode() (FocusMode, error) {
+	if !c.connected {
+		return 0, fmt.Errorf("camera not connected")
+	}
+
+	var mode C.int
+	result := C.fm_get_focus_mode(&mode)
+
+	if result == 0 {
+		return FocusMode(mode), nil
+	}
+	return 0, fmt.Errorf("failed to get focus mode, code: %d", result)
+}
+
+// SetFocusMode sets the camera focus mode
+func (c *Camera) SetFocusMode(mode FocusMode) error {
+	if !c.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	// Validate mode
+	if mode != FocusModeManual && mode != FocusModeAFS && mode != FocusModeAFC {
+		return fmt.Errorf("invalid focus mode: 0x%04X", mode)
+	}
+
+	result := C.fm_set_focus_mode(C.int(mode))
+	if result == 0 {
+		return nil
+	}
+	return fmt.Errorf("failed to set focus mode, code: %d", result)
+}
+
+// GetSupportedFocusModes returns the list of focus modes supported by the attached lens
+func (c *Camera) GetSupportedFocusModes() ([]FocusMode, error) {
+	if !c.connected {
+		return nil, fmt.Errorf("camera not connected")
+	}
+
+	// First get the count
+	var count C.int
+	result := C.fm_get_supported_focus_modes(&count, nil)
+	if result != 0 {
+		return nil, fmt.Errorf("failed to get focus mode count, code: %d", result)
+	}
+
+	if count == 0 {
+		return nil, fmt.Errorf("no supported focus modes found")
+	}
+
+	// Allocate array for the modes
+	modes := make([]C.int, int(count))
+	result = C.fm_get_supported_focus_modes(&count, &modes[0])
+	if result != 0 {
+		return nil, fmt.Errorf("failed to get focus modes, code: %d", result)
+	}
+
+	// Convert to Go FocusMode slice
+	goModes := make([]FocusMode, int(count))
+	for i := 0; i < int(count); i++ {
+		goModes[i] = FocusMode(modes[i])
+	}
+
+	return goModes, nil
+}
+
 // Capture triggers a photo capture
 func (c *Camera) Capture() error {
 	if !c.connected {

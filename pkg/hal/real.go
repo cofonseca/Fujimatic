@@ -220,6 +220,66 @@ func (r *RealCamera) GetSupportedShutterSpeeds() ([]int, error) {
 	return r.sdkCamera.GetSupportedShutterSpeeds()
 }
 
+// GetFocusMode returns the current focus mode
+func (r *RealCamera) GetFocusMode() (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.connected {
+		return 0, fmt.Errorf("camera not connected")
+	}
+
+	if r.sdkCamera == nil {
+		return 0, fmt.Errorf("SDK camera not initialized")
+	}
+
+	mode, err := r.sdkCamera.GetFocusMode()
+	return int(mode), err
+}
+
+// SetFocusMode sets the camera focus mode
+func (r *RealCamera) SetFocusMode(mode int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	if r.sdkCamera == nil {
+		return fmt.Errorf("SDK camera not initialized")
+	}
+
+	return r.sdkCamera.SetFocusMode(sdk.FocusMode(mode))
+}
+
+// GetSupportedFocusModes returns the list of focus modes supported by the attached lens
+func (r *RealCamera) GetSupportedFocusModes() ([]int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.connected {
+		return nil, fmt.Errorf("camera not connected")
+	}
+
+	if r.sdkCamera == nil {
+		return nil, fmt.Errorf("SDK camera not initialized")
+	}
+
+	modes, err := r.sdkCamera.GetSupportedFocusModes()
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert sdk.FocusMode slice to int slice
+	intModes := make([]int, len(modes))
+	for i, mode := range modes {
+		intModes[i] = int(mode)
+	}
+
+	return intModes, nil
+}
+
 // Capture triggers a photo capture
 func (r *RealCamera) Capture() error {
 	r.mu.Lock()

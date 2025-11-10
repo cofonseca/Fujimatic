@@ -42,6 +42,15 @@ type Camera interface {
 	// GetSupportedShutterSpeeds returns the list of supported shutter speeds in microseconds
 	GetSupportedShutterSpeeds() ([]int, error)
 
+	// GetFocusMode returns the current focus mode
+	GetFocusMode() (int, error)
+
+	// SetFocusMode sets the camera focus mode
+	SetFocusMode(mode int) error
+
+	// GetSupportedFocusModes returns the list of focus modes supported by the attached lens
+	GetSupportedFocusModes() ([]int, error)
+
 	// Capture triggers a photo capture
 	Capture() error
 

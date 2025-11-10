@@ -150,7 +150,12 @@ Total: ~20 seconds (captures/downloads overlap during delays)
 
 ### Other Features
 
-- **Manual exposure control**: Set ISO, shutter speed, focus
+- **Manual exposure control**: Full control over ISO, shutter speed, and focus mode
+  - **Focus mode control**: Switch between manual and auto focus (for astrophotography workflows)
+    - Interactive: `get focus`, `set focus manual|auto`
+    - Non-interactive: `--focus-mode manual|auto`
+    - Default: Manual mode (prevents unwanted autofocus during long capture sessions)
+    - Soft error handling for manual-only lenses
 - **Session management**: Save/load capture sessions with state persistence
 - **Battery monitoring**: Auto-pause at configurable threshold (default 10%)
 - **Pause/Resume**: Interrupt and continue intervalometer sessions

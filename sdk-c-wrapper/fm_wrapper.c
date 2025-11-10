@@ -745,6 +745,127 @@ int fm_get_supported_shutter_speeds(int* count, int* speeds) {
     return 0;
 }
 
+int fm_get_focus_mode(int* mode) {
+    if (g_hCamera == NULL) {
+        fprintf(stderr, "fm_get_focus_mode: Camera not connected\n");
+        return -1;
+    }
+
+    if (mode == NULL) {
+        fprintf(stderr, "fm_get_focus_mode: mode pointer is NULL\n");
+        return -2;
+    }
+
+    // Get focus mode using XSDK_GetProp
+    // API: XSDK_GetProp(hCamera, API_CODE_GetFocusMode, API_PARAM_GetFocusMode, &lFocusMode)
+    long focus_mode = 0;
+    long result = XSDK_GetProp(g_hCamera, API_CODE_GetFocusMode, 1, &focus_mode);
+
+    if (result != 0) {
+        fprintf(stderr, "fm_get_focus_mode: XSDK_GetProp failed with code: %ld\n", result);
+        return -3;
+    }
+
+    *mode = (int)focus_mode;
+    if (verbose_logging) {
+        const char* mode_name = "UNKNOWN";
+        if (focus_mode == SDK_FOCUS_MANUAL) mode_name = "MANUAL";
+        else if (focus_mode == SDK_FOCUS_AFS) mode_name = "AF-S";
+        else if (focus_mode == SDK_FOCUS_AFC) mode_name = "AF-C";
+        printf("Current focus mode: %s (0x%04X)\n", mode_name, *mode);
+    }
+    return 0;
+}
+
+int fm_set_focus_mode(int mode) {
+    if (g_hCamera == NULL) {
+        fprintf(stderr, "fm_set_focus_mode: Camera not connected\n");
+        return -1;
+    }
+
+    // Validate mode
+    if (mode != SDK_FOCUS_MANUAL && mode != SDK_FOCUS_AFS && mode != SDK_FOCUS_AFC) {
+        fprintf(stderr, "fm_set_focus_mode: Invalid focus mode (must be 0x0001=MANUAL, 0x8001=AFS, or 0x8002=AFC)\n");
+        return -2;
+    }
+
+    if (verbose_logging) {
+        const char* mode_name = "UNKNOWN";
+        if (mode == SDK_FOCUS_MANUAL) mode_name = "MANUAL";
+        else if (mode == SDK_FOCUS_AFS) mode_name = "AF-S";
+        else if (mode == SDK_FOCUS_AFC) mode_name = "AF-C";
+        printf("Setting focus mode to %s (0x%04X)...\n", mode_name, mode);
+    }
+
+    // Set focus mode using XSDK_SetProp
+    // API: XSDK_SetProp(hCamera, API_CODE_SetFocusMode, API_PARAM_SetFocusMode, lFocusMode)
+    long result = XSDK_SetProp(g_hCamera, API_CODE_SetFocusMode, 1, (long)mode);
+
+    if (result != 0) {
+        fprintf(stderr, "fm_set_focus_mode: XSDK_SetProp failed with code: %ld\n", result);
+        fprintf(stderr, "  Camera handle: %p\n", (void*)g_hCamera);
+        fprintf(stderr, "  Focus mode: 0x%04X\n", mode);
+
+        // Check if lens supports autofocus
+        if (mode != SDK_FOCUS_MANUAL && result != 0) {
+            fprintf(stderr, "  -> This may indicate the lens does not support autofocus\n");
+        }
+        return -3;
+    }
+
+    if (verbose_logging) {
+        printf("Focus mode set successfully\n");
+    }
+    return 0;
+}
+
+int fm_get_supported_focus_modes(int* count, int* modes) {
+    if (g_hCamera == NULL) {
+        fprintf(stderr, "fm_get_supported_focus_modes: Camera not connected\n");
+        return -1;
+    }
+
+    if (count == NULL) {
+        fprintf(stderr, "fm_get_supported_focus_modes: count pointer is NULL\n");
+        return -2;
+    }
+
+    // Query supported focus modes using XSDK_CapProp
+    // API: XSDK_CapProp(hCamera, API_CODE_CapFocusMode, API_PARAM_CapFocusMode, &lNum, plFocusMode)
+    long num_modes = 0;
+    long supported_modes[10]; // Max possible modes
+    memset(supported_modes, 0, sizeof(supported_modes));
+
+    long result = XSDK_CapProp(g_hCamera, API_CODE_CapFocusMode, 2, &num_modes, supported_modes);
+
+    if (result != 0) {
+        fprintf(stderr, "fm_get_supported_focus_modes: XSDK_CapProp failed with code: %ld\n", result);
+        return -3;
+    }
+
+    *count = (int)num_modes;
+
+    if (verbose_logging) {
+        printf("Camera supports %ld focus modes:\n", num_modes);
+        for (long i = 0; i < num_modes; i++) {
+            const char* mode_name = "UNKNOWN";
+            if (supported_modes[i] == SDK_FOCUS_MANUAL) mode_name = "MANUAL";
+            else if (supported_modes[i] == SDK_FOCUS_AFS) mode_name = "AF-S";
+            else if (supported_modes[i] == SDK_FOCUS_AFC) mode_name = "AF-C";
+            printf("  %ld: %s (0x%04lX)\n", i + 1, mode_name, supported_modes[i]);
+        }
+    }
+
+    // Copy to output array if provided
+    if (modes != NULL && num_modes > 0) {
+        for (long i = 0; i < num_modes; i++) {
+            modes[i] = (int)supported_modes[i];
+        }
+    }
+
+    return 0;
+}
+
 int fm_set_verbose(int enabled) {
     verbose_logging = enabled;
     if (verbose_logging) {

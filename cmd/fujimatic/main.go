@@ -45,6 +45,7 @@ func main() {
 	// Non-interactive mode flags
 	iso := flag.Int("iso", 0, "Set ISO value (e.g., --iso 800)")
 	shutter := flag.String("shutter", "", "Set shutter speed (e.g., --shutter 1/125, --shutter 10s)")
+	focusMode := flag.String("focus-mode", "", "Set focus mode: manual or auto (e.g., --focus-mode manual)")
 	frames := flag.Int("frames", 0, "Number of frames to capture (required for capture)")
 	delay := flag.Int("delay", 0, "Delay between frames in seconds (optional, defaults to 0)")
 	output := flag.String("output", "", "Output directory for captures (optional, defaults to current directory)")
@@ -52,9 +53,9 @@ func main() {
 	flag.Parse()
 
 	// Check if non-interactive mode is requested
-	if *frames > 0 || *iso > 0 || *shutter != "" {
+	if *frames > 0 || *iso > 0 || *shutter != "" || *focusMode != "" {
 		// Non-interactive mode
-		if err := runNonInteractive(fakeCamera, verbose, iso, shutter, frames, delay, output); err != nil {
+		if err := runNonInteractive(fakeCamera, verbose, iso, shutter, focusMode, frames, delay, output); err != nil {
 			fmt.Printf("Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -212,14 +213,17 @@ func (s *Shell) cmdHelp() error {
 	fmt.Println("  disconnect           - Disconnect from camera")
 	fmt.Println("  status               - Show camera and session status")
 	fmt.Println("  battery              - Show battery level")
-	fmt.Println("  get <iso|shutter>    - Get current camera setting")
-	fmt.Println("  set <iso|shutter> <value> - Set camera setting")
+	fmt.Println("  get <iso|shutter|focus>    - Get current camera setting")
+	fmt.Println("  set <iso|shutter|focus> <value> - Set camera setting")
 	fmt.Println("                         Shutter speeds (photographer-friendly):")
 	fmt.Println("                         - Fractions: 1/30, 1/125, 1/250, 1/500, 1/1000, 1/2000, 1/4000")
 	fmt.Println("                         - Decimals: 0.5, 1, 2, 4, 30 (in seconds)")
 	fmt.Println("                         - Optional 's' suffix: 1/125s, 0.5s, 2s")
 	fmt.Println("                         - Range: 1/8000s to 3600s (1 hour)")
 	fmt.Println("                         - Auto-validates against camera's supported speeds")
+	fmt.Println("                         Focus mode:")
+	fmt.Println("                         - manual: Manual focus (locked, no AF)")
+	fmt.Println("                         - auto: Single-shot autofocus before each capture")
 	fmt.Println("  shutters              - List available shutter speeds (diagnostic)")
 	fmt.Println("                         (Camera set to Manual exposure mode automatically)")
 	fmt.Println()
@@ -307,6 +311,19 @@ func (s *Shell) cmdStatus() error {
 			} else {
 				fmt.Printf("  Shutter: %.6fs\n", seconds)
 			}
+		}
+
+		if focusMode, err := s.camera.GetFocusMode(); err == nil {
+			modeName := "Unknown"
+			switch focusMode {
+			case 0x0001:
+				modeName = "Manual"
+			case 0x8001:
+				modeName = "AF-S (Auto)"
+			case 0x8002:
+				modeName = "AF-C"
+			}
+			fmt.Printf("  Focus: %s\n", modeName)
 		}
 	} else {
 		fmt.Println("  Camera: Not connected")
@@ -1118,7 +1135,7 @@ func (s *Shell) cmdGet(args []string) error {
 	}
 
 	if len(args) == 0 {
-		return fmt.Errorf("usage: get <iso|shutter>")
+		return fmt.Errorf("usage: get <iso|shutter|focus>")
 	}
 
 	param := args[0]
@@ -1145,8 +1162,24 @@ func (s *Shell) cmdGet(args []string) error {
 		}
 		fmt.Println()
 
+	case "focus":
+		focusMode, err := s.camera.GetFocusMode()
+		if err != nil {
+			return fmt.Errorf("failed to get focus mode: %w", err)
+		}
+		modeName := "Unknown"
+		switch focusMode {
+		case 0x0001:
+			modeName = "Manual"
+		case 0x8001:
+			modeName = "AF-S (Auto)"
+		case 0x8002:
+			modeName = "AF-C"
+		}
+		fmt.Printf("Current focus mode: %s\n", modeName)
+
 	default:
-		return fmt.Errorf("unknown parameter: %s (use 'iso' or 'shutter')", param)
+		return fmt.Errorf("unknown parameter: %s (use 'iso', 'shutter', or 'focus')", param)
 	}
 
 	return nil
@@ -1158,7 +1191,7 @@ func (s *Shell) cmdSet(args []string) error {
 	}
 
 	if len(args) < 2 {
-		return fmt.Errorf("usage: set <iso|shutter> <value>")
+		return fmt.Errorf("usage: set <iso|shutter|focus> <value>")
 	}
 
 	param := args[0]
@@ -1236,8 +1269,61 @@ func (s *Shell) cmdSet(args []string) error {
 		}
 		fmt.Println()
 
+	case "focus":
+		// CRITICAL: Ensure camera is in Manual exposure mode for focus control
+		fmt.Println("Setting camera to Manual exposure mode...")
+		if err := s.camera.SetExposureMode(0x0001); err != nil {
+			return fmt.Errorf("failed to set Manual exposure mode: %w", err)
+		}
+		fmt.Println("✅ Manual exposure mode set")
+
+		// Parse focus mode value: "manual" or "auto"
+		var focusModeValue int
+		switch value {
+		case "manual":
+			focusModeValue = 0x0001 // SDK_FOCUS_MANUAL
+		case "auto":
+			focusModeValue = 0x8001 // SDK_FOCUS_AFS (single-shot AF)
+		default:
+			return fmt.Errorf("invalid focus mode: %s (use 'manual' or 'auto')", value)
+		}
+
+		// Try to get supported focus modes first (for soft error handling)
+		supportedModes, err := s.camera.GetSupportedFocusModes()
+		if err != nil {
+			fmt.Printf("Warning: Failed to query supported focus modes: %v\n", err)
+			fmt.Println("Attempting to set focus mode anyway...")
+		} else {
+			// Check if requested mode is supported
+			modeSupported := false
+			for _, mode := range supportedModes {
+				if mode == focusModeValue {
+					modeSupported = true
+					break
+				}
+			}
+
+			// Soft error: If autofocus requested but not supported (manual-only lens)
+			if !modeSupported && focusModeValue != 0x0001 {
+				fmt.Printf("⚠️  Warning: Lens does not support autofocus (manual-only lens detected)\n")
+				fmt.Println("Continuing in manual focus mode...")
+				focusModeValue = 0x0001 // Fall back to manual
+			}
+		}
+
+		// Set the focus mode
+		if err := s.camera.SetFocusMode(focusModeValue); err != nil {
+			return fmt.Errorf("failed to set focus mode: %w", err)
+		}
+
+		modeName := "Manual"
+		if focusModeValue == 0x8001 {
+			modeName = "AF-S (Auto)"
+		}
+		fmt.Printf("Focus mode set to: %s\n", modeName)
+
 	default:
-		return fmt.Errorf("unknown parameter: %s (use 'iso' or 'shutter')", param)
+		return fmt.Errorf("unknown parameter: %s (use 'iso', 'shutter', or 'focus')", param)
 	}
 
 	return nil
@@ -1462,7 +1548,7 @@ func formatDuration(d time.Duration) string {
 }
 
 // runNonInteractive executes the non-interactive mode with the specified parameters
-func runNonInteractive(fakeCamera *bool, verbose *bool, iso *int, shutter *string, frames *int, delay *int, output *string) error {
+func runNonInteractive(fakeCamera *bool, verbose *bool, iso *int, shutter *string, focusMode *string, frames *int, delay *int, output *string) error {
 	var camera hal.Camera
 
 	if *fakeCamera {
@@ -1565,6 +1651,54 @@ func runNonInteractive(fakeCamera *bool, verbose *bool, iso *int, shutter *strin
 			fmt.Printf(" = %s", actualFraction)
 		}
 		fmt.Println(")")
+	}
+
+	if *focusMode != "" {
+		// CRITICAL: Ensure camera is in Manual exposure mode for focus control
+		fmt.Print("Setting camera to Manual exposure mode... ")
+		if err := camera.SetExposureMode(0x0001); err != nil {
+			return fmt.Errorf("failed to set Manual exposure mode: %w", err)
+		}
+		fmt.Println("✅")
+
+		fmt.Printf("Setting focus mode to %s... ", *focusMode)
+		var focusModeValue int
+		switch *focusMode {
+		case "manual":
+			focusModeValue = 0x0001 // SDK_FOCUS_MANUAL
+		case "auto":
+			focusModeValue = 0x8001 // SDK_FOCUS_AFS
+		default:
+			return fmt.Errorf("invalid focus mode: %s (use 'manual' or 'auto')", *focusMode)
+		}
+
+		// Try to get supported focus modes (for soft error handling)
+		supportedModes, err := camera.GetSupportedFocusModes()
+		if err != nil {
+			fmt.Printf("Warning: Failed to query supported focus modes: %v\n", err)
+			fmt.Println("Attempting to set focus mode anyway...")
+		} else {
+			// Check if requested mode is supported
+			modeSupported := false
+			for _, mode := range supportedModes {
+				if mode == focusModeValue {
+					modeSupported = true
+					break
+				}
+			}
+
+			// Soft error: If autofocus requested but not supported
+			if !modeSupported && focusModeValue != 0x0001 {
+				fmt.Printf("⚠️  Warning: Lens does not support autofocus\n")
+				fmt.Print("Continuing in manual focus mode... ")
+				focusModeValue = 0x0001 // Fall back to manual
+			}
+		}
+
+		if err := camera.SetFocusMode(focusModeValue); err != nil {
+			return fmt.Errorf("failed to set focus mode: %w", err)
+		}
+		fmt.Println("✅")
 	}
 
 	// Check if capture is requested

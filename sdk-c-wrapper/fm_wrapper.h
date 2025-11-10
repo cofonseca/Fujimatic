@@ -20,6 +20,9 @@ int fm_capture();
 int fm_download_last(const char* outdir, const char* filename);
 int fm_get_supported_shutter_count(int* count);
 int fm_get_supported_shutter_speeds(int* count, int* speeds);
+int fm_get_focus_mode(int* mode);
+int fm_set_focus_mode(int mode);
+int fm_get_supported_focus_modes(int* count, int* modes);
 int fm_set_verbose(int enabled);
 
 #ifdef __cplusplus

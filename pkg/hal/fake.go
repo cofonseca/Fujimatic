@@ -13,6 +13,7 @@ type FakeCamera struct {
 	shutterSpeed int
 	iso          int
 	exposureMode int
+	focusMode    int
 	captureCount int
 	mu           sync.Mutex
 }
@@ -25,6 +26,7 @@ func NewFakeCamera() *FakeCamera {
 		shutterSpeed: 1,
 		iso:          800, // Default ISO
 		exposureMode: 0x0006, // Default to Program mode
+		focusMode:    0x0001, // Default to Manual focus
 		captureCount: 0,
 	}
 }
@@ -216,6 +218,63 @@ func (f *FakeCamera) GetSupportedShutterSpeeds() ([]int, error) {
 		1000000, // 1s
 		2000000, // 2s
 		4000000, // 4s
+	}, nil
+}
+
+// GetFocusMode returns the current focus mode
+func (f *FakeCamera) GetFocusMode() (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.connected {
+		return 0, fmt.Errorf("camera not connected")
+	}
+
+	return f.focusMode, nil
+}
+
+// SetFocusMode sets the camera focus mode
+func (f *FakeCamera) SetFocusMode(mode int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	// Validate mode (manual=0x0001, AFS=0x8001, AFC=0x8002)
+	if mode != 0x0001 && mode != 0x8001 && mode != 0x8002 {
+		return fmt.Errorf("invalid focus mode: 0x%04X", mode)
+	}
+
+	f.focusMode = mode
+	modeName := "Unknown"
+	switch mode {
+	case 0x0001:
+		modeName = "Manual"
+	case 0x8001:
+		modeName = "AF-S"
+	case 0x8002:
+		modeName = "AF-C"
+	}
+	fmt.Printf("Fake camera: Focus mode set to %s\n", modeName)
+	return nil
+}
+
+// GetSupportedFocusModes returns the list of focus modes supported by the fake camera
+func (f *FakeCamera) GetSupportedFocusModes() ([]int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.connected {
+		return nil, fmt.Errorf("camera not connected")
+	}
+
+	// Fake camera supports all three focus modes
+	return []int{
+		0x0001, // Manual
+		0x8001, // AF-S
+		0x8002, // AF-C
 	}, nil
 }
 
