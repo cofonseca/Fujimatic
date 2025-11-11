@@ -173,6 +173,31 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
+// GetNextStandaloneFilename finds the next available capture_NNNN.RAF filename in the given directory
+// This is used for standalone captures without a session
+func GetNextStandaloneFilename(outputDir string) (string, error) {
+	// Ensure output directory exists
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create output directory: %w", err)
+	}
+
+	// Find next available number
+	sequenceNum := 1
+	for {
+		filename := fmt.Sprintf("capture_%04d.RAF", sequenceNum)
+		filePath := filepath.Join(outputDir, filename)
+		if !fileExists(filePath) {
+			return filename, nil
+		}
+		sequenceNum++
+
+		// Safety check to prevent infinite loop
+		if sequenceNum > 99999 {
+			return "", fmt.Errorf("too many capture files in directory")
+		}
+	}
+}
+
 // GetIntegrationTime calculates total integration time (frames × shutter speed)
 // Returns integration time in seconds
 func (s *Session) GetIntegrationTime() float64 {

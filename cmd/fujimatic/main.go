@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -12,7 +14,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cfonseca/fujimatic/pkg/api"
+	"github.com/cfonseca/fujimatic/pkg/client"
 	"github.com/cfonseca/fujimatic/pkg/hal"
+	"github.com/cfonseca/fujimatic/pkg/logger"
+	"github.com/cfonseca/fujimatic/pkg/server"
 	"github.com/cfonseca/fujimatic/pkg/session"
 )
 
@@ -38,10 +44,22 @@ func NewShell(camera hal.Camera) *Shell {
 }
 
 func main() {
-	// Parse command line flags
+	// Check for server mode (first argument is "server")
+	if len(os.Args) > 1 && os.Args[1] == "server" {
+		runServer()
+		return
+	}
+
+	// Check for client mode (first argument is "client")
+	if len(os.Args) > 1 && os.Args[1] == "client" {
+		runClient()
+		return
+	}
+
+	// Parse command line flags for local mode
 	fakeCamera := flag.Bool("fake-camera", false, "Use fake camera for testing/debugging (default: use real camera)")
 	verbose := flag.Bool("verbose", false, "Enable verbose logging (shows detailed SDK debug output)")
-	
+
 	// Non-interactive mode flags
 	iso := flag.Int("iso", 0, "Set ISO value (e.g., --iso 800)")
 	shutter := flag.String("shutter", "", "Set shutter speed (e.g., --shutter 1/125, --shutter 10s)")
@@ -49,7 +67,7 @@ func main() {
 	frames := flag.Int("frames", 0, "Number of frames to capture (required for capture)")
 	delay := flag.Int("delay", 0, "Delay between frames in seconds (optional, defaults to 0)")
 	output := flag.String("output", "", "Output directory for captures (optional, defaults to current directory)")
-	
+
 	flag.Parse()
 
 	// Check if non-interactive mode is requested
@@ -499,33 +517,6 @@ func (s *Shell) cmdCapture(args []string) error {
 		return fmt.Errorf("camera not connected - use 'connect' first")
 	}
 
-	// Auto-create session if none exists
-	if s.session == nil {
-		fmt.Println("No active session. Creating new session...")
-		fmt.Print("Project name: ")
-
-		projectName, err := s.reader.ReadString('\n')
-		if err != nil {
-			return fmt.Errorf("failed to read project name: %w", err)
-		}
-		projectName = strings.TrimSpace(projectName)
-
-		if projectName == "" {
-			return fmt.Errorf("project name cannot be empty")
-		}
-
-		// Use default output directory (current directory + captures)
-		outputDir := filepath.Join(".", "captures")
-
-		newSession, err := session.New(projectName, outputDir, s.camera)
-		if err != nil {
-			return fmt.Errorf("failed to create session: %w", err)
-		}
-
-		s.session = newSession
-		fmt.Printf("Session created: %s -> %s\n", projectName, outputDir)
-	}
-
 	// Parse arguments: capture [--async] [count] [delay]
 	var count int = 1    // Default: single capture
 	var delay int = 0    // Default: no delay
@@ -560,13 +551,40 @@ func (s *Shell) cmdCapture(args []string) error {
 		}
 	}
 
-	// Single capture mode (count=0 or count=1 with no args) - always synchronous
+	// Single capture mode (count=1 with no args) - does NOT require session
 	if count == 1 && len(args) == argStart {
 		return s.captureSingle()
 	}
 
-	// Intervalometer mode (count > 1 or count == 0 for infinite)
-	// Run in background goroutine so REPL stays responsive
+	// Intervalometer mode (count > 1 or count == 0 for infinite) - REQUIRES session
+	// Auto-create session if none exists
+	if s.session == nil {
+		fmt.Println("Intervalometer requires a session. Creating new session...")
+		fmt.Print("Project name: ")
+
+		projectName, err := s.reader.ReadString('\n')
+		if err != nil {
+			return fmt.Errorf("failed to read project name: %w", err)
+		}
+		projectName = strings.TrimSpace(projectName)
+
+		if projectName == "" {
+			return fmt.Errorf("project name cannot be empty")
+		}
+
+		// Use default output directory (current directory + captures)
+		outputDir := filepath.Join(".", "captures")
+
+		newSession, err := session.New(projectName, outputDir, s.camera)
+		if err != nil {
+			return fmt.Errorf("failed to create session: %w", err)
+		}
+
+		s.session = newSession
+		fmt.Printf("Session created: %s -> %s\n", projectName, outputDir)
+	}
+
+	// Run intervalometer in background goroutine so REPL stays responsive
 	if asyncMode {
 		go s.captureIntervalAsync(count, delay)
 		fmt.Println("Async intervalometer started in background")
@@ -581,15 +599,43 @@ func (s *Shell) cmdCapture(args []string) error {
 }
 
 func (s *Shell) captureSingle() error {
-	filename := s.session.GetNextFilename()
-	filepath := s.session.GetNextFilePath()
-	fmt.Printf("Capturing %s...\n", filename)
+	if s.session != nil {
+		// Session-based capture
+		filename := s.session.GetNextFilename()
+		filepath := s.session.GetNextFilePath()
+		fmt.Printf("Capturing %s...\n", filename)
 
-	if err := s.session.Capture(); err != nil {
-		return fmt.Errorf("capture failed: %w", err)
+		if err := s.session.Capture(); err != nil {
+			return fmt.Errorf("capture failed: %w", err)
+		}
+
+		fmt.Printf("Captured and saved: %s\n", filepath)
+	} else {
+		// Standalone capture (no session)
+		outputDir := "./captures"
+
+		// Get next available filename
+		filename, err := session.GetNextStandaloneFilename(outputDir)
+		if err != nil {
+			return fmt.Errorf("failed to generate filename: %w", err)
+		}
+
+		fmt.Printf("Capturing %s...\n", filename)
+
+		// Trigger camera capture
+		if err := s.camera.Capture(); err != nil {
+			return fmt.Errorf("capture failed: %w", err)
+		}
+
+		// Download the captured image
+		if err := s.camera.DownloadLast(outputDir, filename); err != nil {
+			return fmt.Errorf("download failed: %w", err)
+		}
+
+		filePath := filepath.Join(outputDir, filename)
+		fmt.Printf("Captured and saved: %s\n", filePath)
 	}
 
-	fmt.Printf("Captured and saved: %s\n", filepath)
 	return nil
 }
 
@@ -1797,4 +1843,186 @@ func runNonInteractive(fakeCamera *bool, verbose *bool, iso *int, shutter *strin
 	fmt.Println("Non-interactive mode completed with settings applied")
 	fmt.Println("Use --frames to start a capture session")
 	return nil
+}
+
+// runServer starts the HTTP REST API server
+func runServer() {
+	// Create a new flag set for server mode
+	serverFlags := flag.NewFlagSet("server", flag.ExitOnError)
+	port := serverFlags.Int("port", 8080, "HTTP server port (default: 8080)")
+	fakeCamera := serverFlags.Bool("fake-camera", false, "Use fake camera for testing")
+	verbose := serverFlags.Bool("verbose", false, "Enable verbose logging")
+
+	// Parse server-specific flags
+	serverFlags.Parse(os.Args[2:])
+
+	// Initialize camera
+	var camera hal.Camera
+	if *fakeCamera {
+		fmt.Println("Using fake camera (testing mode)")
+		camera = hal.NewFakeCamera()
+	} else {
+		// Initialize SDK for real camera
+		sdkPath := os.Getenv("FUJI_SDK_PATH")
+		if sdkPath == "" {
+			fmt.Println("Error: FUJI_SDK_PATH environment variable not set")
+			fmt.Println("Please set it to the path of the Fujifilm SDK redistributables directory")
+			fmt.Println("Example (Windows): setx FUJI_SDK_PATH \"C:\\Path\\To\\sdk\\REDISTRIBUTABLES\"")
+			fmt.Println()
+			fmt.Println("For testing without hardware, use: fujimatic server --fake-camera")
+			os.Exit(1)
+		}
+
+		// Configure verbose logging
+		if *verbose {
+			if err := hal.SetVerbose(true); err != nil {
+				fmt.Printf("Warning: Failed to enable verbose logging: %v\n", err)
+			}
+		}
+
+		if *verbose {
+			fmt.Printf("Initializing Fujifilm SDK from: %s\n", sdkPath)
+		}
+		result, err := hal.InitSDK(sdkPath)
+		if err != nil {
+			fmt.Printf("Error: Failed to initialize SDK: %v\n", err)
+			fmt.Println()
+			fmt.Println("For testing without hardware, use: fujimatic server --fake-camera")
+			os.Exit(1)
+		}
+
+		if result != hal.InitSuccess {
+			fmt.Printf("Error: SDK initialization returned: %v\n", result)
+			fmt.Println()
+			fmt.Println("For testing without hardware, use: fujimatic server --fake-camera")
+			os.Exit(1)
+		}
+
+		if *verbose {
+			fmt.Println("SDK initialized successfully")
+		}
+
+		camera = hal.NewDefaultCamera()
+	}
+
+	// Create server state
+	state := server.NewState(camera)
+
+	// Create API server
+	apiServer := api.NewServer(state, *port)
+
+	// Set up signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// Start server in a goroutine
+	errChan := make(chan error, 1)
+	go func() {
+		logger.Info("Starting Fujimatic server on port %d", *port)
+		fmt.Printf("Fujimatic server running at http://localhost:%d/\n", *port)
+		fmt.Println("Press Ctrl+C to stop")
+		errChan <- apiServer.Start()
+	}()
+
+	// Wait for shutdown signal or server error
+	select {
+	case <-sigChan:
+		logger.Info("Received shutdown signal")
+		fmt.Println("\nShutting down server...")
+
+		// Disconnect camera if connected
+		if camera.IsConnected() {
+			logger.Info("Disconnecting camera...")
+			if err := camera.Disconnect(); err != nil {
+				logger.Error("Failed to disconnect camera: %v", err)
+			}
+		}
+
+		// Graceful shutdown with timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := apiServer.Stop(ctx); err != nil {
+			logger.Error("Server shutdown error: %v", err)
+			os.Exit(1)
+		}
+
+		logger.Info("Server stopped successfully")
+		fmt.Println("Server stopped")
+
+	case err := <-errChan:
+		if err != nil {
+			logger.Error("Server error: %v", err)
+			fmt.Printf("Server error: %v\n", err)
+			os.Exit(1)
+		}
+	}
+}
+
+// runClient starts the client mode for remote camera control
+func runClient() {
+	// Create a new flag set for client mode
+	clientFlags := flag.NewFlagSet("client", flag.ExitOnError)
+	serverAddr := clientFlags.String("server", "", "Server address (hostname[:port], default port 8080)")
+
+	// Parse client-specific flags
+	clientFlags.Parse(os.Args[2:])
+
+	// Validate server address
+	if *serverAddr == "" {
+		fmt.Println("Error: --server flag is required in client mode")
+		fmt.Println("Usage: fujimatic client --server <address>")
+		fmt.Println()
+		fmt.Println("Examples:")
+		fmt.Println("  fujimatic client --server localhost")
+		fmt.Println("  fujimatic client --server raspberry-pi:8080")
+		fmt.Println("  fujimatic client --server 192.168.1.100")
+		os.Exit(1)
+	}
+
+	// Create remote camera client
+	fmt.Printf("Connecting to server at %s...\n", *serverAddr)
+	remoteCamera, err := client.NewRemoteCamera(*serverAddr)
+	if err != nil {
+		fmt.Printf("Error: Failed to create remote camera client: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Test server connectivity with a status check
+	var statusResp api.CameraStatusResponse
+	testURL := remoteCamera.GetBaseURL() + "/api/camera/status"
+	testResp, err := remoteCamera.GetHTTPClient().Get(testURL)
+	if err != nil {
+		fmt.Printf("Error: Cannot connect to server: %v\n", err)
+		fmt.Println()
+		fmt.Println("Troubleshooting:")
+		fmt.Println("  1. Is the server running? (fujimatic server)")
+		fmt.Println("  2. Is the server address correct?")
+		fmt.Println("  3. Is the network reachable?")
+		os.Exit(1)
+	}
+	defer testResp.Body.Close()
+
+	if testResp.StatusCode == 200 {
+		// Server is reachable
+		fmt.Printf("✓ Connected to server\n")
+	} else {
+		fmt.Printf("Warning: Server returned status %d\n", testResp.StatusCode)
+	}
+
+	// Check if camera is already connected
+	if testResp.StatusCode == 200 {
+		if err := json.NewDecoder(testResp.Body).Decode(&statusResp); err == nil {
+			if statusResp.Connected {
+				fmt.Printf("✓ Camera already connected (battery: %d%%, model: %s)\n", statusResp.Battery, statusResp.Model)
+			}
+		}
+	}
+	fmt.Println()
+
+	// Start the interactive shell with remote camera
+	// Cast to hal.Camera interface
+	var camera hal.Camera = remoteCamera
+	shell := NewShell(camera)
+	shell.Run()
 }

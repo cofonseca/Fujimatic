@@ -513,23 +513,61 @@ int fm_capture() {
 
     long shot_opt = 0;
     long af_status = 0;
-    if (verbose_logging) {
-        printf("Triggering shutter release (mode: 0x%04X)...\n", XSDK_RELEASE_SHOOT_S1OFF);
-    }
-    long result = XSDK_Release(g_hCamera, XSDK_RELEASE_SHOOT_S1OFF, &shot_opt, &af_status);
+    long result = 0;
 
-    if (result != XSDK_COMPLETE) {
+    // Retry logic for camera initialization issues
+    // Some cameras need extra time after connection before first capture works
+    int max_retries = 3;
+    int retry_delay_ms = 200;
+
+    for (int attempt = 0; attempt < max_retries; attempt++) {
+        if (verbose_logging && attempt > 0) {
+            printf("Retry attempt %d/%d...\n", attempt + 1, max_retries);
+        }
+
+        if (verbose_logging) {
+            printf("Triggering shutter release (mode: 0x%04X)...\n", XSDK_RELEASE_SHOOT_S1OFF);
+        }
+        result = XSDK_Release(g_hCamera, XSDK_RELEASE_SHOOT_S1OFF, &shot_opt, &af_status);
+
+        if (result == XSDK_COMPLETE) {
+            // Success!
+            break;
+        }
+
         // Get detailed error information
         long api_code = 0;
         long err_code = 0;
         XSDK_GetErrorNumber(g_hCamera, &api_code, &err_code);
+
+        // Check if this is a retryable error
+        // 0x1008 = Camera not fully initialized (common on first capture)
+        // 0x8002 = Camera busy
+        if (err_code == 0x1008 || err_code == 0x8002) {
+            if (attempt < max_retries - 1) {
+                if (verbose_logging) {
+                    fprintf(stderr, "fm_capture: Temporary error (0x%04lX), retrying after %dms...\n",
+                            err_code, retry_delay_ms);
+                }
+#ifdef _WIN32
+                Sleep(retry_delay_ms);
+#else
+                usleep(retry_delay_ms * 1000);
+#endif
+                continue;  // Retry
+            }
+        }
+
+        // Non-retryable error or max retries reached
         fprintf(stderr, "fm_capture: XSDK_Release failed\n");
         fprintf(stderr, "  Return code: %ld\n", result);
         fprintf(stderr, "  API code: %ld (0x%04lX)\n", api_code, api_code);
         fprintf(stderr, "  Error code: %ld (0x%04lX)\n", err_code, err_code);
 
         // Common error codes
-        if (err_code == 0x8002) {
+        if (err_code == 0x1008) {
+            fprintf(stderr, "  -> Camera not ready (initialization issue)\n");
+        } else if (err_code == 0x8002) {
             fprintf(stderr, "  -> Camera is BUSY (try again)\n");
         } else if (err_code == 0x8003) {
             fprintf(stderr, "  -> Invalid parameter\n");
@@ -539,6 +577,11 @@ int fm_capture() {
             fprintf(stderr, "  -> Camera in wrong priority mode\n");
         }
 
+        return -2;
+    }
+
+    if (result != XSDK_COMPLETE) {
+        // Should not reach here, but just in case
         return -2;
     }
 
