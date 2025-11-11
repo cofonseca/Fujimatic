@@ -46,8 +46,9 @@ func (s *Server) handleCameraConnect(w http.ResponseWriter, r *http.Request) {
 	// Check if already connected
 	if camera.IsConnected() {
 		s.sendJSON(w, http.StatusOK, ConnectResponse{
-			Status:  "already_connected",
-			Battery: 0,
+			Status:      "already_connected",
+			StatusCode:  200,
+			Battery:     0,
 		})
 		return
 	}
@@ -65,8 +66,9 @@ func (s *Server) handleCameraConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.sendJSON(w, http.StatusOK, ConnectResponse{
-		Status:  "connected",
-		Battery: battery,
+		Status:      "connected",
+		StatusCode:  200,
+		Battery:     battery,
 	})
 }
 
@@ -81,7 +83,8 @@ func (s *Server) handleCameraDisconnect(w http.ResponseWriter, r *http.Request) 
 	// Check if not connected
 	if !camera.IsConnected() {
 		s.sendJSON(w, http.StatusOK, DisconnectResponse{
-			Status: "already_disconnected",
+			Status:     "already_disconnected",
+			StatusCode: 200,
 		})
 		return
 	}
@@ -93,7 +96,8 @@ func (s *Server) handleCameraDisconnect(w http.ResponseWriter, r *http.Request) 
 	}
 
 	s.sendJSON(w, http.StatusOK, DisconnectResponse{
-		Status: "disconnected",
+		Status:     "disconnected",
+		StatusCode: 200,
 	})
 }
 
@@ -164,7 +168,11 @@ func (s *Server) handleSettingsISO(w http.ResponseWriter, r *http.Request) {
 			s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get ISO: %v", err))
 			return
 		}
-		s.sendJSON(w, http.StatusOK, ISOGetResponse{ISO: iso})
+		s.sendJSON(w, http.StatusOK, ISOGetResponse{
+			ISO:        iso,
+			Status:     "ok",
+			StatusCode: 200,
+		})
 
 	case http.MethodPost:
 		var req ISOSetRequest
@@ -179,8 +187,9 @@ func (s *Server) handleSettingsISO(w http.ResponseWriter, r *http.Request) {
 		}
 
 		s.sendJSON(w, http.StatusOK, ISOSetResponse{
-			ISO:    req.ISO,
-			Status: "ok",
+			ISO:        req.ISO,
+			Status:     "ok",
+			StatusCode: 200,
 		})
 
 	default:
@@ -208,8 +217,9 @@ func (s *Server) handleSettingsShutter(w http.ResponseWriter, r *http.Request) {
 		shutterDisplay := formatShutterSpeed(shutterUS)
 
 		s.sendJSON(w, http.StatusOK, ShutterGetResponse{
-			ShutterUS:      shutterUS,
-			ShutterDisplay: shutterDisplay,
+			ShutterSpeed: shutterDisplay,
+			Status:       "ok",
+			StatusCode:   200,
 		})
 
 	case http.MethodPost:
@@ -245,8 +255,9 @@ func (s *Server) handleSettingsShutter(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			s.sendJSON(w, http.StatusOK, ShutterSetResponse{
-				ShutterUS: requestedUS,
-				Status:    "ok",
+				ShutterSpeed: formatShutterSpeed(requestedUS),
+				Status:       "ok",
+				StatusCode:   200,
 			})
 			return
 		}
@@ -263,9 +274,9 @@ func (s *Server) handleSettingsShutter(w http.ResponseWriter, r *http.Request) {
 		// Return the actual speed that was set
 		actualDisplay := formatShutterSpeed(closestUS)
 		s.sendJSON(w, http.StatusOK, ShutterSetResponse{
-			ShutterUS:      closestUS,
-			ShutterDisplay: actualDisplay,
-			Status:         "ok",
+			ShutterSpeed: actualDisplay,
+			Status:       "ok",
+			StatusCode:   200,
 		})
 
 	default:
@@ -290,7 +301,11 @@ func (s *Server) handleSettingsFocus(w http.ResponseWriter, r *http.Request) {
 		}
 		// Convert int mode to string
 		modeStr := focusModeToString(mode)
-		s.sendJSON(w, http.StatusOK, FocusGetResponse{FocusMode: modeStr})
+		s.sendJSON(w, http.StatusOK, FocusGetResponse{
+			FocusMode:  modeStr,
+			Status:     "ok",
+			StatusCode: 200,
+		})
 
 	case http.MethodPost:
 		var req FocusSetRequest
@@ -312,8 +327,9 @@ func (s *Server) handleSettingsFocus(w http.ResponseWriter, r *http.Request) {
 		}
 
 		s.sendJSON(w, http.StatusOK, FocusSetResponse{
-			FocusMode: req.FocusMode,
-			Status:    "ok",
+			FocusMode:  req.FocusMode,
+			Status:     "ok",
+			StatusCode: 200,
 		})
 
 	default:
@@ -387,7 +403,8 @@ func (s *Server) handleSessionStop(w http.ResponseWriter, r *http.Request) {
 	s.state.ClearSession()
 
 	s.sendJSON(w, http.StatusOK, SessionStopResponse{
-		Status: "stopped",
+		Status:     "stopped",
+		StatusCode: 200,
 	})
 }
 
@@ -458,9 +475,10 @@ func (s *Server) handleCaptureSingle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.sendJSON(w, http.StatusOK, CaptureSingleResponse{
-		Filename: filename,
-		Size:     size,
-		Status:   "ok",
+		Filename:   filename,
+		Size:       size,
+		Status:     "ok",
+		StatusCode: 200,
 	})
 }
 
@@ -533,19 +551,46 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 <body>
     <h1>Fujimatic REST API Server</h1>
     <p>Server is running. Web UI coming in G-5.</p>
+    
+    <h2>API Response Format</h2>
+    <div style="background: #f9f9f9; padding: 15px; margin: 15px 0; border: 1px solid #ddd;">
+        <p><strong>All endpoints return both numeric status codes and human-readable messages:</strong></p>
+        <pre style="background: #fff; padding: 10px; border: 1px solid #ccc;">
+{
+  "status": "ok",
+  "status_code": 200
+}</pre>
+    </div>
+    
     <h2>Available Endpoints:</h2>
     <div class="endpoint"><span class="method">POST</span> /api/camera/connect</div>
     <div class="endpoint"><span class="method">POST</span> /api/camera/disconnect</div>
     <div class="endpoint"><span class="method">GET</span> /api/camera/status</div>
     <div class="endpoint"><span class="method">GET</span> /api/camera/battery</div>
     <div class="endpoint"><span class="method">GET/POST</span> /api/settings/iso</div>
-    <div class="endpoint"><span class="method">GET/POST</span> /api/settings/shutter</div>
+    <div class="endpoint"><span class="method">GET/POST</span> /api/settings/shutter <small>(shutter_speed field)</small></div>
     <div class="endpoint"><span class="method">GET/POST</span> /api/settings/focus</div>
     <div class="endpoint"><span class="method">GET</span> /api/session</div>
     <div class="endpoint"><span class="method">POST</span> /api/session/start</div>
     <div class="endpoint"><span class="method">POST</span> /api/session/stop</div>
     <div class="endpoint"><span class="method">POST</span> /api/capture/single</div>
     <div class="endpoint"><span class="method">GET</span> /api/capture/status</div>
+    
+    <h2>Example Usage</h2>
+    <div style="background: #f9f9f9; padding: 15px; margin: 15px 0; border: 1px solid #ddd;">
+        <h4>Set shutter speed:</h4>
+        <pre style="background: #fff; padding: 10px; border: 1px solid #ccc;">
+curl -X POST http://localhost:8080/api/settings/shutter \
+  -H "Content-Type: application/json" \
+  -d '{"shutter": "1/60"}'
+
+Response:
+{
+  "shutter_speed": "1/60",
+  "status": "ok", 
+  "status_code": 200
+}</pre>
+    </div>
 </body>
 </html>`
 

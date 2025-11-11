@@ -1208,20 +1208,20 @@ File: jupiter_video_0001.MOV
 
 **Camera Settings:**
 - `GET /api/settings/iso` - Get current ISO
-  - Response: `{iso: 800}`
+  - Response: `{iso: 800, status: "ok", status_code: 200}`
 - `POST /api/settings/iso` - Set ISO
   - Request: `{iso: 1600}`
-  - Response: `{iso: 1600, status: "ok"}`
+  - Response: `{iso: 1600, status: "ok", status_code: 200}`
 - `GET /api/settings/shutter` - Get shutter speed
-  - Response: `{shutter_us: 8000, shutter_display: "1/125s"}`
+  - Response: `{shutter_speed: "1/125", status: "ok", status_code: 200}`
 - `POST /api/settings/shutter` - Set shutter speed
   - Request: `{shutter: "1/250"}` or `{shutter_us: 4000}`
-  - Response: `{shutter_us: 4000, status: "ok"}`
+  - Response: `{shutter_speed: "1/250", status: "ok", status_code: 200}`
 - `GET /api/settings/focus` - Get focus mode
-  - Response: `{focus_mode: "manual"}`
+  - Response: `{focus_mode: "manual", status: "ok", status_code: 200}`
 - `POST /api/settings/focus` - Set focus mode
   - Request: `{focus_mode: "auto"}`
-  - Response: `{focus_mode: "auto", status: "ok"}`
+  - Response: `{focus_mode: "auto", status: "ok", status_code: 200}`
 
 **Session Management:**
 - `GET /api/session` - Get current session state

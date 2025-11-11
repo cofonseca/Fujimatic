@@ -79,6 +79,110 @@ See **[BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md)** for detailed build docume
 
 # With fake camera (for testing)
 ./bin/fujimatic.exe --fake-camera
+
+# Start REST API server
+./bin/fujimatic.exe server --port 8080
+
+# Connect to remote server (client mode)
+./bin/fujimatic.exe client --server localhost:8080
+```
+
+---
+
+## REST API Server
+
+Fujimatic includes a built-in REST API server for remote camera control, making it ideal for automation and integration with other tools.
+
+### Starting the Server
+
+```bash
+# Start server on default port 8080
+./bin/fujimatic.exe server
+
+# Start server on custom port
+./bin/fujimatic.exe server --port 8080
+
+# Use fake camera for testing
+./bin/fujimatic.exe server --fake-camera --port 8080
+```
+
+### API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/camera/connect` | Connect to camera |
+| POST | `/api/camera/disconnect` | Disconnect from camera |
+| GET | `/api/camera/status` | Get connection and battery status |
+| GET | `/api/camera/battery` | Get battery level |
+| GET/POST | `/api/settings/iso` | Get/set ISO sensitivity |
+| GET/POST | `/api/settings/shutter` | Get/set shutter speed |
+| GET/POST | `/api/settings/focus` | Get/set focus mode |
+| GET | `/api/session` | Get current session info |
+| POST | `/api/session/start` | Start new capture session |
+| POST | `/api/session/stop` | Stop current session |
+| POST | `/api/capture/single` | Capture single image |
+| GET | `/api/capture/status` | Get capture status |
+
+### API Response Format
+
+All successful responses include both numeric status codes and human-readable messages:
+
+```json
+{
+  "status": "ok",
+  "status_code": 200
+}
+```
+
+Settings endpoints return both the value and status:
+
+```json
+// GET /api/settings/iso
+{
+  "iso": 800,
+  "status": "ok",
+  "status_code": 200
+}
+
+// POST /api/settings/shutter
+{
+  "shutter_speed": "1/60",
+  "status": "ok", 
+  "status_code": 200
+}
+```
+
+### Example Usage
+
+#### Set shutter speed:
+
+```bash
+curl -X POST http://localhost:8080/api/settings/shutter \
+  -H "Content-Type: application/json" \
+  -d '{"shutter": "1/60"}'
+```
+
+#### Get current settings:
+
+```bash
+curl http://localhost:8080/api/settings/shutter
+curl http://localhost:8080/api/settings/iso
+```
+
+#### Capture image:
+
+```bash
+curl -X POST http://localhost:8080/api/capture/single
+```
+
+### PowerShell Integration
+
+The included PowerShell script demonstrates API usage:
+
+```powershell
+. ./scripts/Test-FujimaticApi.ps1
+$server = "http://localhost:8080"
+Test-FujimaticAPI
 ```
 
 ---

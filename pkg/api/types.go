@@ -5,12 +5,14 @@ package api
 // Camera Control
 
 type ConnectResponse struct {
-	Status  string `json:"status"`
-	Battery int    `json:"battery"`
+	Status      string `json:"status"`
+	StatusCode  int    `json:"status_code"`
+	Battery     int    `json:"battery"`
 }
 
 type DisconnectResponse struct {
-	Status string `json:"status"`
+	Status     string `json:"status"`
+	StatusCode int    `json:"status_code"`
 }
 
 type CameraStatusResponse struct {
@@ -27,7 +29,9 @@ type BatteryResponse struct {
 // Camera Settings
 
 type ISOGetResponse struct {
-	ISO int `json:"iso"`
+	ISO        int    `json:"iso"`
+	Status     string `json:"status"`
+	StatusCode int    `json:"status_code"`
 }
 
 type ISOSetRequest struct {
@@ -35,13 +39,15 @@ type ISOSetRequest struct {
 }
 
 type ISOSetResponse struct {
-	ISO    int    `json:"iso"`
-	Status string `json:"status"`
+	ISO        int    `json:"iso"`
+	Status     string `json:"status"`
+	StatusCode int    `json:"status_code"`
 }
 
 type ShutterGetResponse struct {
-	ShutterUS      int    `json:"shutter_us"`
-	ShutterDisplay string `json:"shutter_display"`
+	ShutterSpeed string `json:"shutter_speed"` // API response
+	Status       string `json:"status"`        // API response
+	StatusCode   int    `json:"status_code"`   // API response
 }
 
 type ShutterSetRequest struct {
@@ -50,13 +56,15 @@ type ShutterSetRequest struct {
 }
 
 type ShutterSetResponse struct {
-	ShutterUS      int    `json:"shutter_us"`
-	ShutterDisplay string `json:"shutter_display,omitempty"` // Human-readable format (e.g., "1/125s")
-	Status         string `json:"status"`
+	ShutterSpeed string `json:"shutter_speed"`
+	Status       string `json:"status"`
+	StatusCode   int    `json:"status_code"`
 }
 
 type FocusGetResponse struct {
-	FocusMode string `json:"focus_mode"` // "manual", "auto"
+	FocusMode  string `json:"focus_mode"` // "manual", "auto"
+	Status     string `json:"status"`
+	StatusCode int    `json:"status_code"`
 }
 
 type FocusSetRequest struct {
@@ -64,8 +72,9 @@ type FocusSetRequest struct {
 }
 
 type FocusSetResponse struct {
-	FocusMode string `json:"focus_mode"`
-	Status    string `json:"status"`
+	FocusMode  string `json:"focus_mode"`
+	Status     string `json:"status"`
+	StatusCode int    `json:"status_code"`
 }
 
 // Session Management
@@ -88,15 +97,17 @@ type SessionStartResponse struct {
 }
 
 type SessionStopResponse struct {
-	Status string `json:"status"`
+	Status     string `json:"status"`
+	StatusCode int    `json:"status_code"`
 }
 
 // Capture
 
 type CaptureSingleResponse struct {
-	Filename string `json:"filename"`
-	Size     int64  `json:"size"`
-	Status   string `json:"status"`
+	Filename   string `json:"filename"`
+	Size       int64  `json:"size"`
+	Status     string `json:"status"`
+	StatusCode int    `json:"status_code"`
 }
 
 type CaptureStartRequest struct {
@@ -107,23 +118,27 @@ type CaptureStartRequest struct {
 
 type CaptureStartResponse struct {
 	Status      string `json:"status"`
+	StatusCode  int    `json:"status_code"`
 	TotalFrames int    `json:"total_frames"`
 }
 
 type CapturePauseResponse struct {
-	Status string `json:"status"`
-	Frame  int    `json:"frame"`
-	Total  int    `json:"total"`
+	Status     string `json:"status"`
+	StatusCode int    `json:"status_code"`
+	Frame      int    `json:"frame"`
+	Total      int    `json:"total"`
 }
 
 type CaptureResumeResponse struct {
-	Status string `json:"status"`
-	Frame  int    `json:"frame"`
-	Total  int    `json:"total"`
+	Status     string `json:"status"`
+	StatusCode int    `json:"status_code"`
+	Frame      int    `json:"frame"`
+	Total      int    `json:"total"`
 }
 
 type CaptureStopResponse struct {
-	Status string `json:"status"`
+	Status     string `json:"status"`
+	StatusCode int    `json:"status_code"`
 }
 
 type CaptureStatusResponse struct {
@@ -137,11 +152,13 @@ type CaptureStatusResponse struct {
 // Live View
 
 type LiveViewStartResponse struct {
-	Status string `json:"status"`
+	Status     string `json:"status"`
+	StatusCode int    `json:"status_code"`
 }
 
 type LiveViewStopResponse struct {
-	Status string `json:"status"`
+	Status     string `json:"status"`
+	StatusCode int    `json:"status_code"`
 }
 
 // Error Response

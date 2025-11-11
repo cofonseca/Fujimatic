@@ -157,7 +157,8 @@ func (c *RemoteCamera) GetShutter() (int, error) {
 	if err := c.get("/api/settings/shutter", &resp); err != nil {
 		return 0, err
 	}
-	return resp.ShutterUS, nil
+	// Parse the shutter_speed string back to microseconds
+	return api.ShutterSpeedToMicroseconds(resp.ShutterSpeed)
 }
 
 // SetShutter sets the shutter speed in microseconds
