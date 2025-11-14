@@ -280,9 +280,20 @@
 
         liveviewImg.onerror = function() {
             streamActive = false;
-            updateStatus('Disconnected', false);
-            showError('Live view stream disconnected. Click "Start Live View" to reconnect.');
-            loadingOverlay.classList.remove('show');
+
+            // If src is empty, we intentionally stopped - don't show error
+            if (liveviewImg.src === '' || liveviewImg.src === window.location.href) {
+                updateStatus('Stopped', false);
+                loadingOverlay.classList.add('show');
+                loadingOverlay.querySelector('div[style]').textContent = 'Live view stopped';
+                hideError();
+            } else {
+                // Stream disconnected unexpectedly
+                updateStatus('Disconnected', false);
+                showError('Live view stream disconnected. Click "Start Live View" to reconnect.');
+                loadingOverlay.classList.add('show');
+                loadingOverlay.querySelector('div[style]').textContent = 'Disconnected';
+            }
         };
 
         async function startLiveView() {
@@ -296,7 +307,9 @@
 
                 // Reload stream with new timestamp
                 loadingOverlay.classList.add('show');
+                loadingOverlay.querySelector('div[style]').textContent = 'Loading stream...';
                 updateStatus('Starting...', false);
+                hideError();
 
                 setTimeout(() => {
                     liveviewImg.src = '/liveview?' + new Date().getTime();
@@ -316,6 +329,14 @@
                     const error = await response.json();
                     throw new Error(error.error || 'Failed to stop live view');
                 }
+
+                // Clear the image source to remove the last frame
+                liveviewImg.src = '';
+                streamActive = false;
+
+                // Show loading overlay with stopped message
+                loadingOverlay.classList.add('show');
+                loadingOverlay.querySelector('div[style]').textContent = 'Live view stopped';
 
                 updateStatus('Stopped', false);
                 hideError();

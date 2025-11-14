@@ -577,8 +577,20 @@ func (s *Server) handleLiveViewStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if live view is already stopped (idempotent operation)
+	active, err := camera.IsLiveViewActive()
+	if err == nil && !active {
+		// Already stopped - return success anyway (idempotent)
+		response := map[string]interface{}{
+			"status":  "already_stopped",
+			"message": "Live view already stopped",
+		}
+		s.sendJSON(w, http.StatusOK, response)
+		return
+	}
+
 	// Stop live view
-	err := camera.StopLiveView()
+	err = camera.StopLiveView()
 	if err != nil {
 		s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to stop live view: %v", err))
 		return
