@@ -8,26 +8,30 @@ import (
 
 // FakeCamera provides a fake implementation of Camera for testing
 type FakeCamera struct {
-	connected    bool
-	batteryLevel int
-	shutterSpeed int
-	iso          int
-	exposureMode int
-	focusMode    int
-	captureCount int
-	mu           sync.Mutex
+	connected      bool
+	batteryLevel   int
+	shutterSpeed   int
+	iso            int
+	exposureMode   int
+	focusMode      int
+	captureCount   int
+	liveViewActive bool
+	liveViewSize   int
+	mu             sync.Mutex
 }
 
 // NewFakeCamera creates a new fake camera instance
 func NewFakeCamera() *FakeCamera {
 	return &FakeCamera{
-		connected:    false,
-		batteryLevel: 100,
-		shutterSpeed: 1,
-		iso:          800, // Default ISO
-		exposureMode: 0x0006, // Default to Program mode
-		focusMode:    0x0001, // Default to Manual focus
-		captureCount: 0,
+		connected:      false,
+		batteryLevel:   100,
+		shutterSpeed:   1,
+		iso:            800,     // Default ISO
+		exposureMode:   0x0006,  // Default to Program mode
+		focusMode:      0x0001,  // Default to Manual focus
+		captureCount:   0,
+		liveViewActive: false,
+		liveViewSize:   1, // Default to Medium size
 	}
 }
 
@@ -334,4 +338,94 @@ func (f *FakeCamera) SetBatteryLevel(level int) {
 	if level >= 0 && level <= 100 {
 		f.batteryLevel = level
 	}
+}
+
+// ========== Live View Methods ==========
+
+// StartLiveView starts live view streaming
+func (f *FakeCamera) StartLiveView() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	f.liveViewActive = true
+	return nil
+}
+
+// StopLiveView stops live view streaming
+func (f *FakeCamera) StopLiveView() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	f.liveViewActive = false
+	return nil
+}
+
+// GetLiveViewFrame returns a fake JPEG frame
+// This returns a minimal valid JPEG for testing
+func (f *FakeCamera) GetLiveViewFrame() ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.connected {
+		return nil, fmt.Errorf("camera not connected")
+	}
+
+	if !f.liveViewActive {
+		return nil, fmt.Errorf("live view not active")
+	}
+
+	// Return a minimal valid JPEG image (1x1 pixel gray)
+	// This is a real JPEG that can be displayed in browsers
+	minimalJPEG := []byte{
+		0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
+		0x01, 0x01, 0x00, 0x48, 0x00, 0x48, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43,
+		0x00, 0x03, 0x02, 0x02, 0x02, 0x02, 0x02, 0x03, 0x02, 0x02, 0x02, 0x03,
+		0x03, 0x03, 0x03, 0x04, 0x06, 0x04, 0x04, 0x04, 0x04, 0x04, 0x08, 0x06,
+		0x06, 0x05, 0x06, 0x09, 0x08, 0x0A, 0x0A, 0x09, 0x08, 0x09, 0x09, 0x0A,
+		0x0C, 0x0F, 0x0C, 0x0A, 0x0B, 0x0E, 0x0B, 0x09, 0x09, 0x0D, 0x11, 0x0D,
+		0x0E, 0x0F, 0x10, 0x10, 0x11, 0x10, 0x0A, 0x0C, 0x12, 0x13, 0x12, 0x10,
+		0x13, 0x0F, 0x10, 0x10, 0x10, 0xFF, 0xC9, 0x00, 0x0B, 0x08, 0x00, 0x01,
+		0x00, 0x01, 0x01, 0x01, 0x11, 0x00, 0xFF, 0xCC, 0x00, 0x06, 0x00, 0x10,
+		0x10, 0x05, 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00,
+		0xD2, 0xCF, 0x20, 0xFF, 0xD9,
+	}
+
+	return minimalJPEG, nil
+}
+
+// IsLiveViewActive checks if live view is currently running
+func (f *FakeCamera) IsLiveViewActive() (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.connected {
+		return false, fmt.Errorf("camera not connected")
+	}
+
+	return f.liveViewActive, nil
+}
+
+// SetLiveViewSize sets the live view image size (0=S, 1=M, 2=L)
+func (f *FakeCamera) SetLiveViewSize(size int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	if size < 0 || size > 2 {
+		return fmt.Errorf("invalid size: must be 0 (S), 1 (M), or 2 (L)")
+	}
+
+	f.liveViewSize = size
+	return nil
 }

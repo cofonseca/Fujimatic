@@ -285,3 +285,56 @@ func (c *RemoteCamera) GetExposureMode() (int, error) {
 	const ManualMode = 0x0001
 	return ManualMode, nil
 }
+
+// ========== Live View Methods (E-3) ==========
+
+// StartLiveView starts live view streaming on the server
+func (c *RemoteCamera) StartLiveView() error {
+	resp, err := c.httpClient.Post(c.baseURL+"/api/liveview/start", "application/json", nil)
+	if err != nil {
+		return fmt.Errorf("failed to start live view: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("server returned status %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+// StopLiveView stops live view streaming on the server
+func (c *RemoteCamera) StopLiveView() error {
+	resp, err := c.httpClient.Post(c.baseURL+"/api/liveview/stop", "application/json", nil)
+	if err != nil {
+		return fmt.Errorf("failed to stop live view: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("server returned status %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+// GetLiveViewFrame is not implemented for remote cameras
+// Use browser to view live stream at http://server:port/
+func (c *RemoteCamera) GetLiveViewFrame() ([]byte, error) {
+	return nil, fmt.Errorf("live view frames not available via client API - open browser to %s/ to view stream", c.baseURL)
+}
+
+// IsLiveViewActive checks if live view is currently running on the server
+func (c *RemoteCamera) IsLiveViewActive() (bool, error) {
+	// This would require a status endpoint, but for now we can return false
+	// since the server auto-starts live view when browsers connect
+	return false, fmt.Errorf("live view status not available for remote cameras")
+}
+
+// SetLiveViewSize sets the live view image size on the server
+// This is a no-op for remote cameras (server uses default medium size)
+func (c *RemoteCamera) SetLiveViewSize(size int) error {
+	// Server automatically uses medium size (640px)
+	// No need to expose this to remote clients
+	return nil
+}

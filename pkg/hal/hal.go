@@ -56,6 +56,22 @@ type Camera interface {
 
 	// DownloadLast downloads the last captured image to the specified location
 	DownloadLast(outputDir, filename string) error
+
+	// Live view methods
+	// StartLiveView starts live view streaming
+	StartLiveView() error
+
+	// StopLiveView stops live view streaming
+	StopLiveView() error
+
+	// GetLiveViewFrame retrieves a single JPEG frame from live view
+	GetLiveViewFrame() ([]byte, error)
+
+	// IsLiveViewActive checks if live view is currently running
+	IsLiveViewActive() (bool, error)
+
+	// SetLiveViewSize sets the live view image size (0=S, 1=M, 2=L)
+	SetLiveViewSize(size int) error
 }
 
 // InitResult represents the result of SDK initialization

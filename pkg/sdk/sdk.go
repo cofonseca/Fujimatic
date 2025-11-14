@@ -386,3 +386,103 @@ func (c *Camera) DownloadLast(outputDir, filename string) error {
 func (c *Camera) IsConnected() bool {
 	return c.connected
 }
+
+// ========== Live View Functions ==========
+
+// LiveViewFrame represents a single JPEG frame from live view
+type LiveViewFrame struct {
+	Data []byte
+	Size int
+}
+
+// StartLiveView starts live view streaming
+func (c *Camera) StartLiveView() error {
+	if !c.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	result := C.fm_start_liveview()
+	if result != 0 {
+		return fmt.Errorf("failed to start live view: error code %d", result)
+	}
+
+	return nil
+}
+
+// StopLiveView stops live view streaming
+func (c *Camera) StopLiveView() error {
+	if !c.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	result := C.fm_stop_liveview()
+	if result != 0 {
+		return fmt.Errorf("failed to stop live view: error code %d", result)
+	}
+
+	return nil
+}
+
+// GetLiveViewFrame retrieves a single JPEG frame from live view
+func (c *Camera) GetLiveViewFrame() (*LiveViewFrame, error) {
+	if !c.connected {
+		return nil, fmt.Errorf("camera not connected")
+	}
+
+	var buffer *C.uchar
+	var size C.int
+
+	result := C.fm_get_liveview_frame(&buffer, &size)
+	if result != 0 {
+		return nil, fmt.Errorf("failed to get live view frame: error code %d", result)
+	}
+
+	if buffer == nil || size <= 0 {
+		return nil, fmt.Errorf("empty frame received")
+	}
+
+	// Copy C buffer to Go slice
+	frame := &LiveViewFrame{
+		Data: C.GoBytes(unsafe.Pointer(buffer), size),
+		Size: int(size),
+	}
+
+	// Free C buffer
+	C.fm_free_liveview_frame(buffer)
+
+	return frame, nil
+}
+
+// IsLiveViewActive checks if live view is currently running
+func (c *Camera) IsLiveViewActive() (bool, error) {
+	if !c.connected {
+		return false, fmt.Errorf("camera not connected")
+	}
+
+	var isActive C.int
+	result := C.fm_is_liveview_active(&isActive)
+	if result != 0 {
+		return false, fmt.Errorf("failed to get live view status: error code %d", result)
+	}
+
+	return isActive == 1, nil
+}
+
+// SetLiveViewSize sets the live view image size
+// size: 0=Small (320px), 1=Medium (640px), 2=Large (1024px)
+func (c *Camera) SetLiveViewSize(size int) error {
+	if !c.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	if size < 0 || size > 2 {
+		return fmt.Errorf("invalid size: must be 0 (S), 1 (M), or 2 (L)")
+	}
+
+	result := C.fm_set_liveview_size(C.int(size))
+	if result != 0 {
+		return fmt.Errorf("failed to set live view size: error code %d", result)
+	}
+
+	return nil
+}

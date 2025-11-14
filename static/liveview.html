@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fujimatic Live View</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #1a1a1a;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 10px;
+            color: #fff;
+        }
+
+        .subtitle {
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        .viewer-container {
+            background: #000;
+            border: 2px solid #333;
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+            margin-bottom: 20px;
+        }
+
+        #liveview {
+            width: 100%;
+            height: auto;
+            display: block;
+            min-height: 400px;
+            object-fit: contain;
+        }
+
+        .loading-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px 30px;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .loading-overlay.show {
+            display: block;
+        }
+
+        .spinner {
+            border: 3px solid #333;
+            border-top: 3px solid #4CAF50;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 12px 24px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+            min-width: 120px;
+        }
+
+        button:hover {
+            background: #45a049;
+            transform: translateY(-1px);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        button.secondary {
+            background: #555;
+        }
+
+        button.secondary:hover:not(:disabled) {
+            background: #666;
+        }
+
+        .status-panel {
+            background: #222;
+            padding: 15px 20px;
+            border-radius: 6px;
+            border-left: 3px solid #4CAF50;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #666;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        .status-indicator.active {
+            background: #4CAF50;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .status-text {
+            font-size: 14px;
+            color: #ccc;
+        }
+
+        .status-text strong {
+            color: #fff;
+        }
+
+        .error-message {
+            background: #4a1a1a;
+            color: #ff6b6b;
+            padding: 12px 20px;
+            border-radius: 6px;
+            border-left: 3px solid #ff6b6b;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .info-card {
+            background: #222;
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #333;
+        }
+
+        .info-card-title {
+            font-size: 0.8rem;
+            color: #888;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .info-card-value {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #fff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎥 Fujimatic Live View</h1>
+            <p class="subtitle">Real-time camera preview for astrophotography and film scanning</p>
+        </header>
+
+        <div id="error" class="error-message"></div>
+
+        <div class="viewer-container">
+            <img id="liveview" alt="Live View Stream">
+            <div id="loading" class="loading-overlay show">
+                <div class="spinner"></div>
+                <div style="text-align: center;">Click "Start Live View" to begin</div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="startBtn" onclick="startLiveView()">▶ Start Live View</button>
+            <button id="stopBtn" onclick="stopLiveView()" class="secondary">⏹ Stop Live View</button>
+            <button onclick="toggleFullscreen()" class="secondary">⛶ Fullscreen</button>
+            <button onclick="refreshStream()" class="secondary">↻ Refresh</button>
+        </div>
+
+        <div class="status-panel">
+            <div id="statusIndicator" class="status-indicator"></div>
+            <div class="status-text">
+                <strong>Status:</strong> <span id="statusText">Ready - Click Start</span>
+            </div>
+        </div>
+
+        <div class="info-grid">
+            <div class="info-card">
+                <div class="info-card-title">Stream Format</div>
+                <div class="info-card-value">MJPEG</div>
+            </div>
+            <div class="info-card">
+                <div class="info-card-title">Frame Rate</div>
+                <div class="info-card-value">~5 FPS</div>
+            </div>
+            <div class="info-card">
+                <div class="info-card-title">Resolution</div>
+                <div class="info-card-value">~640px</div>
+            </div>
+            <div class="info-card">
+                <div class="info-card-title">Mode</div>
+                <div class="info-card-value">Medium Quality</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const liveviewImg = document.getElementById('liveview');
+        const statusText = document.getElementById('statusText');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const errorDiv = document.getElementById('error');
+        const loadingOverlay = document.getElementById('loading');
+
+        // Track connection state
+        let streamActive = false;
+
+        // Set up image event handlers (but don't load stream yet)
+        liveviewImg.onload = function() {
+            streamActive = true;
+            loadingOverlay.classList.remove('show');
+            updateStatus('Streaming', true);
+            hideError();
+        };
+
+        liveviewImg.onerror = function() {
+            streamActive = false;
+            updateStatus('Disconnected', false);
+            showError('Live view stream disconnected. Click "Start Live View" to reconnect.');
+            loadingOverlay.classList.remove('show');
+        };
+
+        async function startLiveView() {
+            try {
+                const response = await fetch('/api/liveview/start', { method: 'POST' });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to start live view');
+                }
+
+                // Reload stream with new timestamp
+                loadingOverlay.classList.add('show');
+                updateStatus('Starting...', false);
+
+                setTimeout(() => {
+                    liveviewImg.src = '/liveview?' + new Date().getTime();
+                }, 500);
+
+            } catch (err) {
+                showError('Failed to start live view: ' + err.message);
+                updateStatus('Error', false);
+            }
+        }
+
+        async function stopLiveView() {
+            try {
+                const response = await fetch('/api/liveview/stop', { method: 'POST' });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to stop live view');
+                }
+
+                updateStatus('Stopped', false);
+                hideError();
+
+            } catch (err) {
+                showError('Failed to stop live view: ' + err.message);
+            }
+        }
+
+        function refreshStream() {
+            loadingOverlay.classList.add('show');
+            updateStatus('Refreshing...', false);
+            liveviewImg.src = '/liveview?' + new Date().getTime();
+        }
+
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.querySelector('.viewer-container').requestFullscreen();
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
+        function updateStatus(text, active) {
+            statusText.textContent = text;
+            if (active) {
+                statusIndicator.classList.add('active');
+            } else {
+                statusIndicator.classList.remove('active');
+            }
+        }
+
+        function showError(message) {
+            errorDiv.textContent = '⚠ ' + message;
+            errorDiv.classList.add('show');
+        }
+
+        function hideError() {
+            errorDiv.classList.remove('show');
+        }
+
+        // Stream will start when user clicks "Start Live View" button
+    </script>
+</body>
+</html>

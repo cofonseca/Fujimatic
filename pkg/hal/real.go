@@ -311,3 +311,90 @@ func (r *RealCamera) DownloadLast(outputDir, filename string) error {
 
 	return r.sdkCamera.DownloadLast(outputDir, filename)
 }
+
+// ========== Live View Methods ==========
+
+// StartLiveView starts live view streaming
+func (r *RealCamera) StartLiveView() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	if r.sdkCamera == nil {
+		return fmt.Errorf("SDK camera not initialized")
+	}
+
+	return r.sdkCamera.StartLiveView()
+}
+
+// StopLiveView stops live view streaming
+func (r *RealCamera) StopLiveView() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	if r.sdkCamera == nil {
+		return fmt.Errorf("SDK camera not initialized")
+	}
+
+	return r.sdkCamera.StopLiveView()
+}
+
+// GetLiveViewFrame retrieves a single JPEG frame from live view
+func (r *RealCamera) GetLiveViewFrame() ([]byte, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.connected {
+		return nil, fmt.Errorf("camera not connected")
+	}
+
+	if r.sdkCamera == nil {
+		return nil, fmt.Errorf("SDK camera not initialized")
+	}
+
+	frame, err := r.sdkCamera.GetLiveViewFrame()
+	if err != nil {
+		return nil, err
+	}
+
+	return frame.Data, nil
+}
+
+// IsLiveViewActive checks if live view is currently running
+func (r *RealCamera) IsLiveViewActive() (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.connected {
+		return false, fmt.Errorf("camera not connected")
+	}
+
+	if r.sdkCamera == nil {
+		return false, fmt.Errorf("SDK camera not initialized")
+	}
+
+	return r.sdkCamera.IsLiveViewActive()
+}
+
+// SetLiveViewSize sets the live view image size (0=S, 1=M, 2=L)
+func (r *RealCamera) SetLiveViewSize(size int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	if r.sdkCamera == nil {
+		return fmt.Errorf("SDK camera not initialized")
+	}
+
+	return r.sdkCamera.SetLiveViewSize(size)
+}

@@ -25,6 +25,14 @@ int fm_set_focus_mode(int mode);
 int fm_get_supported_focus_modes(int* count, int* modes);
 int fm_set_verbose(int enabled);
 
+// Live view functions
+int fm_start_liveview();
+int fm_stop_liveview();
+int fm_get_liveview_frame(unsigned char** buffer, int* size);
+void fm_free_liveview_frame(unsigned char* buffer);
+int fm_is_liveview_active(int* is_active);
+int fm_set_liveview_size(int size_code);  // 0=S (320px), 1=M (640px), 2=L (1024px)
+
 #ifdef __cplusplus
 }
 #endif

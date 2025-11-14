@@ -37,7 +37,7 @@ func (s *Server) Start() error {
 		Addr:         fmt.Sprintf(":%d", s.port),
 		Handler:      s.withMiddleware(mux),
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		WriteTimeout: 0, // Disabled for MJPEG streaming support (live view)
 		IdleTimeout:  60 * time.Second,
 	}
 

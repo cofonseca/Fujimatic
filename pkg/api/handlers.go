@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/cfonseca/fujimatic/pkg/logger"
 	"github.com/cfonseca/fujimatic/pkg/session"
@@ -87,6 +88,18 @@ func (s *Server) handleCameraDisconnect(w http.ResponseWriter, r *http.Request) 
 			StatusCode: 200,
 		})
 		return
+	}
+
+	// Auto-stop live view if active (required for proper camera disconnect)
+	active, err := camera.IsLiveViewActive()
+	if err == nil && active {
+		logger.Info("Auto-stopping live view before disconnect...")
+		if err := camera.StopLiveView(); err != nil {
+			logger.Error("Failed to stop live view: %v", err)
+			// Continue with disconnect anyway
+		} else {
+			logger.Info("Live view stopped successfully")
+		}
 	}
 
 	// Disconnect from camera
@@ -514,21 +527,168 @@ func (s *Server) handleCaptureStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Live View Handlers (placeholders for E-3)
+// Live View Handlers (E-3)
 
 func (s *Server) handleLiveViewStart(w http.ResponseWriter, r *http.Request) {
-	s.sendError(w, http.StatusNotImplemented, "Live view not yet implemented")
+	if r.Method != http.MethodPost {
+		s.sendError(w, http.StatusMethodNotAllowed, "POST required")
+		return
+	}
+
+	camera := s.state.GetCamera()
+	if camera == nil {
+		s.sendError(w, http.StatusInternalServerError, "Camera not initialized")
+		return
+	}
+
+	// Check if camera is connected
+	if !camera.IsConnected() {
+		s.sendError(w, http.StatusBadRequest, "Camera not connected")
+		return
+	}
+
+	// Start live view
+	err := camera.StartLiveView()
+	if err != nil {
+		s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to start live view: %v", err))
+		return
+	}
+
+	// NOTE: SetLiveViewSize removed - SDK uses default size automatically
+	// Attempting to set size after start causes XSDK_SetProp to fail
+
+	// Return success response
+	response := map[string]interface{}{
+		"status":  "started",
+		"message": "Live view started successfully",
+	}
+	s.sendJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) handleLiveViewStop(w http.ResponseWriter, r *http.Request) {
-	s.sendError(w, http.StatusNotImplemented, "Live view not yet implemented")
+	if r.Method != http.MethodPost {
+		s.sendError(w, http.StatusMethodNotAllowed, "POST required")
+		return
+	}
+
+	camera := s.state.GetCamera()
+	if camera == nil {
+		s.sendError(w, http.StatusInternalServerError, "Camera not initialized")
+		return
+	}
+
+	// Stop live view
+	err := camera.StopLiveView()
+	if err != nil {
+		s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to stop live view: %v", err))
+		return
+	}
+
+	// Return success response
+	response := map[string]interface{}{
+		"status":  "stopped",
+		"message": "Live view stopped successfully",
+	}
+	s.sendJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) handleLiveViewStream(w http.ResponseWriter, r *http.Request) {
-	s.sendError(w, http.StatusNotImplemented, "Live view not yet implemented")
+	if r.Method != http.MethodGet {
+		s.sendError(w, http.StatusMethodNotAllowed, "GET required")
+		return
+	}
+
+	camera := s.state.GetCamera()
+	if camera == nil {
+		logger.Error("handleLiveViewStream: Camera not initialized")
+		s.sendError(w, http.StatusInternalServerError, "Camera not initialized")
+		return
+	}
+
+	// Check if camera is connected
+	if !camera.IsConnected() {
+		logger.Error("handleLiveViewStream: Camera not connected")
+		s.sendError(w, http.StatusBadRequest, "Camera not connected")
+		return
+	}
+
+	// Check if live view is already active (don't auto-start)
+	logger.Info("Checking if live view is active...")
+	active, err := camera.IsLiveViewActive()
+	if err != nil {
+		logger.Error("handleLiveViewStream: Failed to check live view status: %v", err)
+		s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to check live view status: %v", err))
+		return
+	}
+	logger.Info("Live view active status: %v", active)
+
+	if !active {
+		logger.Error("handleLiveViewStream: Live view not started - use 'Start Live View' button first")
+		s.sendError(w, http.StatusBadRequest, "Live view not started - click 'Start Live View' button first")
+		return
+	}
+
+	// Set MJPEG headers
+	logger.Info("Setting MJPEG headers...")
+	w.Header().Set("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Get flusher for streaming
+	logger.Info("Checking for streaming support...")
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		logger.Error("Streaming not supported by response writer")
+		s.sendError(w, http.StatusInternalServerError, "Streaming not supported")
+		return
+	}
+	logger.Info("Flusher obtained successfully")
+
+	// Stream frames at ~5 fps (200ms interval)
+	logger.Info("Creating ticker for 5fps streaming...")
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	logger.Info("Live view stream started for client %s", r.RemoteAddr)
+	defer logger.Info("Live view stream ended for client %s", r.RemoteAddr)
+
+	for {
+		select {
+		case <-r.Context().Done():
+			// Client disconnected
+			return
+
+		case <-ticker.C:
+			// Get frame from camera
+			frameData, err := camera.GetLiveViewFrame()
+			if err != nil {
+				// Frame polling errors are normal - camera buffer may be temporarily empty
+				// Don't log these as errors to reduce noise (they happen frequently)
+				continue
+			}
+
+			// Skip empty frames
+			if len(frameData) == 0 {
+				// Empty frames are also normal - just wait for next frame
+				continue
+			}
+
+			// Write MJPEG frame
+			fmt.Fprintf(w, "--frame\r\n")
+			fmt.Fprintf(w, "Content-Type: image/jpeg\r\n")
+			fmt.Fprintf(w, "Content-Length: %d\r\n", len(frameData))
+			fmt.Fprintf(w, "\r\n")
+			w.Write(frameData)
+			fmt.Fprintf(w, "\r\n")
+
+			flusher.Flush()
+		}
+	}
 }
 
-// Homepage Handler (placeholder for G-5)
+// Homepage Handler - serves the live view HTML (E-3)
 
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
@@ -536,64 +696,6 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Serve a simple HTML page
-	html := `<!DOCTYPE html>
-<html>
-<head>
-    <title>Fujimatic Server</title>
-    <style>
-        body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
-        h1 { color: #333; }
-        .endpoint { background: #f4f4f4; padding: 10px; margin: 10px 0; border-left: 3px solid #007bff; }
-        .method { font-weight: bold; color: #007bff; }
-    </style>
-</head>
-<body>
-    <h1>Fujimatic REST API Server</h1>
-    <p>Server is running. Web UI coming in G-5.</p>
-    
-    <h2>API Response Format</h2>
-    <div style="background: #f9f9f9; padding: 15px; margin: 15px 0; border: 1px solid #ddd;">
-        <p><strong>All endpoints return both numeric status codes and human-readable messages:</strong></p>
-        <pre style="background: #fff; padding: 10px; border: 1px solid #ccc;">
-{
-  "status": "ok",
-  "status_code": 200
-}</pre>
-    </div>
-    
-    <h2>Available Endpoints:</h2>
-    <div class="endpoint"><span class="method">POST</span> /api/camera/connect</div>
-    <div class="endpoint"><span class="method">POST</span> /api/camera/disconnect</div>
-    <div class="endpoint"><span class="method">GET</span> /api/camera/status</div>
-    <div class="endpoint"><span class="method">GET</span> /api/camera/battery</div>
-    <div class="endpoint"><span class="method">GET/POST</span> /api/settings/iso</div>
-    <div class="endpoint"><span class="method">GET/POST</span> /api/settings/shutter <small>(shutter_speed field)</small></div>
-    <div class="endpoint"><span class="method">GET/POST</span> /api/settings/focus</div>
-    <div class="endpoint"><span class="method">GET</span> /api/session</div>
-    <div class="endpoint"><span class="method">POST</span> /api/session/start</div>
-    <div class="endpoint"><span class="method">POST</span> /api/session/stop</div>
-    <div class="endpoint"><span class="method">POST</span> /api/capture/single</div>
-    <div class="endpoint"><span class="method">GET</span> /api/capture/status</div>
-    
-    <h2>Example Usage</h2>
-    <div style="background: #f9f9f9; padding: 15px; margin: 15px 0; border: 1px solid #ddd;">
-        <h4>Set shutter speed:</h4>
-        <pre style="background: #fff; padding: 10px; border: 1px solid #ccc;">
-curl -X POST http://localhost:8080/api/settings/shutter \
-  -H "Content-Type: application/json" \
-  -d '{"shutter": "1/60"}'
-
-Response:
-{
-  "shutter_speed": "1/60",
-  "status": "ok", 
-  "status_code": 200
-}</pre>
-    </div>
-</body>
-</html>`
-
-	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprint(w, html)
+	// Serve the live view HTML page
+	http.ServeFile(w, r, "static/liveview.html")
 }

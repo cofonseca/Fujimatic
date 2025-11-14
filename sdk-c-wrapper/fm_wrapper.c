@@ -14,11 +14,13 @@
 // Include Fujifilm SDK headers
 #include "../sdk/HEADERS/XAPI.H"
 #include "../sdk/HEADERS/XAPIOpt.H"
+#include "../sdk/HEADERS/X-T3.h"
 
 // Global state
 static LIB_HANDLE g_hLib = NULL;
 static XSDK_HANDLE g_hCamera = NULL;
 static int verbose_logging = 0;
+static int g_liveview_active = 0; // Track live view state (X-T3 doesn't have GetLiveViewStatus)
 
 // Battery level conversion helper
 static int convert_battery_to_percent(long battery_code) {
@@ -236,6 +238,7 @@ int fm_disconnect() {
     }
 
     g_hCamera = NULL;
+    g_liveview_active = 0; // Reset live view state
     printf("Camera disconnected successfully\n");
     return 0;
 }
@@ -915,6 +918,216 @@ int fm_get_supported_focus_modes(int* count, int* modes) {
 
     return 0;
 }
+
+// ========== Live View Functions ==========
+
+int fm_start_liveview() {
+    if (g_hCamera == NULL) {
+        fprintf(stderr, "fm_start_liveview: Camera not connected\n");
+        return -1;
+    }
+
+    if (g_liveview_active) {
+        if (verbose_logging) {
+            printf("Live view already active\n");
+        }
+        return 0; // Already running
+    }
+
+    if (verbose_logging) {
+        printf("Starting live view...\n");
+    }
+
+    // Start live view using XSDK_SetProp
+    long result = XSDK_SetProp(g_hCamera, XT3_API_CODE_StartLiveView, XT3_API_PARAM_StartLiveView);
+
+    if (result != 0) {
+        fprintf(stderr, "fm_start_liveview: XSDK_SetProp failed with code: %ld\n", result);
+        fprintf(stderr, "  Note: Live view requires ReadImage buffer to be empty\n");
+        fprintf(stderr, "  Make sure no images are waiting to be downloaded\n");
+        return -2;
+    }
+
+    g_liveview_active = 1;
+
+    if (verbose_logging) {
+        printf("Live view started successfully\n");
+    }
+
+    return 0;
+}
+
+int fm_stop_liveview() {
+    if (g_hCamera == NULL) {
+        fprintf(stderr, "fm_stop_liveview: Camera not connected\n");
+        return -1;
+    }
+
+    if (!g_liveview_active) {
+        if (verbose_logging) {
+            printf("Live view not active\n");
+        }
+        return 0; // Already stopped
+    }
+
+    if (verbose_logging) {
+        printf("Stopping live view...\n");
+    }
+
+    // Stop live view using XSDK_SetProp
+    long result = XSDK_SetProp(g_hCamera, XT3_API_CODE_StopLiveView, XT3_API_PARAM_StopLiveView);
+
+    if (result != 0) {
+        fprintf(stderr, "fm_stop_liveview: XSDK_SetProp failed with code: %ld\n", result);
+        return -2;
+    }
+
+    g_liveview_active = 0;
+
+    if (verbose_logging) {
+        printf("Live view stopped successfully\n");
+    }
+
+    return 0;
+}
+
+int fm_get_liveview_frame(unsigned char** buffer, int* size) {
+    if (g_hCamera == NULL) {
+        fprintf(stderr, "fm_get_liveview_frame: Camera not connected\n");
+        return -1;
+    }
+
+    if (buffer == NULL || size == NULL) {
+        fprintf(stderr, "fm_get_liveview_frame: NULL parameters\n");
+        return -2;
+    }
+
+    if (!g_liveview_active) {
+        fprintf(stderr, "fm_get_liveview_frame: Live view not active\n");
+        return -3;
+    }
+
+    *buffer = NULL;
+    *size = 0;
+
+    // Read live view image info
+    XSDK_ImageInformation img_info;
+    memset(&img_info, 0, sizeof(img_info));
+    long result = XSDK_ReadImageInfo(g_hCamera, &img_info);
+
+    if (result != 0) {
+        if (verbose_logging) {
+            fprintf(stderr, "fm_get_liveview_frame: XSDK_ReadImageInfo failed with code: %ld\n", result);
+        }
+        return -4;
+    }
+
+    if (img_info.lDataSize <= 0) {
+        if (verbose_logging) {
+            fprintf(stderr, "fm_get_liveview_frame: No frame data available (size: %ld)\n", img_info.lDataSize);
+        }
+        return -5;
+    }
+
+    // Allocate buffer for JPEG data
+    unsigned char* jpeg_buffer = (unsigned char*)malloc(img_info.lDataSize);
+    if (jpeg_buffer == NULL) {
+        fprintf(stderr, "fm_get_liveview_frame: Failed to allocate %ld bytes\n", img_info.lDataSize);
+        return -6;
+    }
+
+    // Read the JPEG frame
+    result = XSDK_ReadImage(g_hCamera, jpeg_buffer, img_info.lDataSize);
+    if (result != 0) {
+        fprintf(stderr, "fm_get_liveview_frame: XSDK_ReadImage failed with code: %ld\n", result);
+        free(jpeg_buffer);
+        return -7;
+    }
+
+    // Delete the frame from buffer (live view generates continuous frames)
+    XSDK_DeleteImage(g_hCamera);
+
+    *buffer = jpeg_buffer;
+    *size = (int)img_info.lDataSize;
+
+    if (verbose_logging) {
+        printf("Got live view frame: %d bytes\n", *size);
+    }
+
+    return 0;
+}
+
+void fm_free_liveview_frame(unsigned char* buffer) {
+    if (buffer != NULL) {
+        free(buffer);
+    }
+}
+
+int fm_is_liveview_active(int* is_active) {
+    if (is_active == NULL) {
+        fprintf(stderr, "fm_is_liveview_active: is_active pointer is NULL\n");
+        return -1;
+    }
+
+    // X-T3 doesn't have GetLiveViewStatus, so we track state manually
+    *is_active = g_liveview_active;
+
+    if (verbose_logging) {
+        printf("Live view active: %s\n", g_liveview_active ? "YES" : "NO");
+    }
+
+    return 0;
+}
+
+int fm_set_liveview_size(int size_code) {
+    if (g_hCamera == NULL) {
+        fprintf(stderr, "fm_set_liveview_size: Camera not connected\n");
+        return -1;
+    }
+
+    // Map size code to SDK constant
+    long sdk_size;
+    const char* size_name;
+
+    switch (size_code) {
+        case 0:
+            sdk_size = XT3_LIVEVIEW_SIZE_S;
+            size_name = "Small (~320px)";
+            break;
+        case 1:
+            sdk_size = XT3_LIVEVIEW_SIZE_M;
+            size_name = "Medium (~640px)";
+            break;
+        case 2:
+            sdk_size = XT3_LIVEVIEW_SIZE_L;
+            size_name = "Large (~1024px)";
+            break;
+        default:
+            fprintf(stderr, "fm_set_liveview_size: Invalid size code (must be 0, 1, or 2)\n");
+            return -2;
+    }
+
+    if (verbose_logging) {
+        printf("Setting live view size to %s...\n", size_name);
+    }
+
+    // Set live view image size
+    long result = XSDK_SetProp(g_hCamera, XT3_API_CODE_SetLiveViewImageSize,
+                               XT3_API_PARAM_SetLiveViewImageSize, sdk_size);
+
+    if (result != 0) {
+        fprintf(stderr, "fm_set_liveview_size: XSDK_SetProp failed with code: %ld\n", result);
+        return -3;
+    }
+
+    if (verbose_logging) {
+        printf("Live view size set to %s successfully\n", size_name);
+    }
+
+    return 0;
+}
+
+// ========== End Live View Functions ==========
 
 int fm_set_verbose(int enabled) {
     verbose_logging = enabled;
