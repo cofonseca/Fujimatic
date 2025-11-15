@@ -194,9 +194,28 @@ func (s *Server) handleSettingsISO(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Auto-stop live view if active (required for ISO changes)
+		var liveViewWasActive bool
+		active, err := camera.IsLiveViewActive()
+		if err == nil && active {
+			liveViewWasActive = true
+			if err := camera.StopLiveView(); err != nil {
+				logger.Error("Failed to stop live view before ISO change: %v", err)
+				// Continue with ISO change anyway
+			}
+		}
+
 		if err := camera.SetISO(req.ISO); err != nil {
 			s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to set ISO: %v", err))
 			return
+		}
+
+		// Auto-restart live view if it was active before
+		if liveViewWasActive {
+			if err := camera.StartLiveView(); err != nil {
+				logger.Error("Failed to restart live view after ISO change: %v", err)
+				// Don't fail the ISO change - just log the error
+			}
 		}
 
 		s.sendJSON(w, http.StatusOK, ISOSetResponse{
@@ -258,6 +277,17 @@ func (s *Server) handleSettingsShutter(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Auto-stop live view if active (required for shutter changes)
+		var liveViewWasActive bool
+		active, err := camera.IsLiveViewActive()
+		if err == nil && active {
+			liveViewWasActive = true
+			if err := camera.StopLiveView(); err != nil {
+				logger.Error("Failed to stop live view before shutter change: %v", err)
+				// Continue with shutter change anyway
+			}
+		}
+
 		// Get supported shutter speeds and find closest match
 		supported, err := camera.GetSupportedShutterSpeeds()
 		if err != nil || len(supported) == 0 {
@@ -267,6 +297,15 @@ func (s *Server) handleSettingsShutter(w http.ResponseWriter, r *http.Request) {
 				s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to set shutter: %v", err))
 				return
 			}
+
+			// Auto-restart live view if it was active before
+			if liveViewWasActive {
+				if err := camera.StartLiveView(); err != nil {
+					logger.Error("Failed to restart live view after shutter change: %v", err)
+					// Don't fail the shutter change - just log the error
+				}
+			}
+
 			s.sendJSON(w, http.StatusOK, ShutterSetResponse{
 				ShutterSpeed: formatShutterSpeed(requestedUS),
 				Status:       "ok",
@@ -282,6 +321,14 @@ func (s *Server) handleSettingsShutter(w http.ResponseWriter, r *http.Request) {
 		if err := camera.SetShutter(closestUS); err != nil {
 			s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to set shutter: %v", err))
 			return
+		}
+
+		// Auto-restart live view if it was active before
+		if liveViewWasActive {
+			if err := camera.StartLiveView(); err != nil {
+				logger.Error("Failed to restart live view after shutter change: %v", err)
+				// Don't fail the shutter change - just log the error
+			}
 		}
 
 		// Return the actual speed that was set
@@ -334,9 +381,34 @@ func (s *Server) handleSettingsFocus(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Auto-stop live view if active (required for focus mode changes)
+		var liveViewWasActive bool
+		active, err := camera.IsLiveViewActive()
+		if err == nil && active {
+			liveViewWasActive = true
+			logger.Info("Auto-stopping live view before focus mode change...")
+			if err := camera.StopLiveView(); err != nil {
+				logger.Error("Failed to stop live view: %v", err)
+				// Continue with focus mode change anyway
+			} else {
+				logger.Info("Live view stopped successfully")
+			}
+		}
+
 		if err := camera.SetFocusMode(modeInt); err != nil {
 			s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to set focus mode: %v", err))
 			return
+		}
+
+		// Auto-restart live view if it was active before
+		if liveViewWasActive {
+			logger.Info("Auto-restarting live view after focus mode change...")
+			if err := camera.StartLiveView(); err != nil {
+				logger.Error("Failed to restart live view: %v", err)
+				// Don't fail the focus mode change - just log the error
+			} else {
+				logger.Info("Live view restarted successfully")
+			}
 		}
 
 		s.sendJSON(w, http.StatusOK, FocusSetResponse{
@@ -508,6 +580,20 @@ func (s *Server) handleCaptureSingle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auto-stop live view if active (required for capture)
+	var liveViewWasActive bool
+	active, err := camera.IsLiveViewActive()
+	if err == nil && active {
+		liveViewWasActive = true
+		logger.Info("Auto-stopping live view before capture...")
+		if err := camera.StopLiveView(); err != nil {
+			logger.Error("Failed to stop live view: %v", err)
+			// Continue with capture anyway
+		} else {
+			logger.Info("Live view stopped successfully")
+		}
+	}
+
 	sess := s.state.GetSession()
 
 	var filename string
@@ -557,6 +643,17 @@ func (s *Server) handleCaptureSingle(w http.ResponseWriter, r *http.Request) {
 	var size int64
 	if err == nil {
 		size = stat.Size()
+	}
+
+	// Auto-restart live view if it was active before capture
+	if liveViewWasActive {
+		logger.Info("Auto-restarting live view after capture...")
+		if err := camera.StartLiveView(); err != nil {
+			logger.Error("Failed to restart live view: %v", err)
+			// Don't fail the capture - just log the error
+		} else {
+			logger.Info("Live view restarted successfully")
+		}
 	}
 
 	s.sendJSON(w, http.StatusOK, CaptureSingleResponse{

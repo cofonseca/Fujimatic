@@ -348,6 +348,32 @@
 
         <div id="error" class="error-message"></div>
 
+        <!-- Camera Connection Panel -->
+        <div style="background: #2a2a2a; border: 2px solid #444; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 20px; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 200px;">
+                    <h2 style="margin: 0 0 15px 0; font-size: 1.3rem;">📡 Camera Status</h2>
+                    <div style="display: grid; grid-template-columns: auto 1fr; gap: 8px 15px; font-size: 0.95rem;">
+                        <strong>Connection:</strong>
+                        <span id="connectionStatus" style="color: #ff6b6b;">Disconnected</span>
+
+                        <strong>Model:</strong>
+                        <span id="cameraModel" style="color: #888;">—</span>
+
+                        <strong>Battery:</strong>
+                        <span id="batteryLevel" style="color: #888;">—</span>
+                    </div>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <button id="connectBtn" onclick="connectCamera()" style="background: #4CAF50; min-width: 180px;">🔌 Connect Camera</button>
+                    <button id="disconnectBtn" onclick="disconnectCamera()" class="secondary" style="min-width: 180px; display: none;">🔌 Disconnect Camera</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Controls Container (disabled until connected) -->
+        <div id="mainControls" style="opacity: 0.4; pointer-events: none;">
+
         <div class="viewer-container">
             <img id="liveview" alt="Live View Stream">
             <div id="loading" class="loading-overlay show">
@@ -360,32 +386,6 @@
             <button id="liveViewToggleBtn" onclick="toggleLiveView()" style="background: #4CAF50;">▶ Start Live View</button>
             <button onclick="toggleFullscreen()" class="secondary">⛶ Fullscreen</button>
             <button onclick="refreshStream()" class="secondary">↻ Refresh</button>
-        </div>
-
-        <div class="status-panel">
-            <div id="statusIndicator" class="status-indicator"></div>
-            <div class="status-text">
-                <strong>Status:</strong> <span id="statusText">Ready - Click Start</span>
-            </div>
-        </div>
-
-        <div class="info-grid">
-            <div class="info-card">
-                <div class="info-card-title">Stream Format</div>
-                <div class="info-card-value">MJPEG</div>
-            </div>
-            <div class="info-card">
-                <div class="info-card-title">Frame Rate</div>
-                <div class="info-card-value">~5 FPS</div>
-            </div>
-            <div class="info-card">
-                <div class="info-card-title">Resolution</div>
-                <div class="info-card-value">~640px</div>
-            </div>
-            <div class="info-card">
-                <div class="info-card-title">Mode</div>
-                <div class="info-card-value">Medium Quality</div>
-            </div>
         </div>
 
         <h2>📷 Camera Controls</h2>
@@ -514,19 +514,18 @@
 
     <script>
         const liveviewImg = document.getElementById('liveview');
-        const statusText = document.getElementById('statusText');
-        const statusIndicator = document.getElementById('statusIndicator');
         const errorDiv = document.getElementById('error');
         const loadingOverlay = document.getElementById('loading');
 
         // Track connection state
         let streamActive = false;
+        let cameraConnected = false;
+        let statusPollInterval = null;
 
         // Set up image event handlers (but don't load stream yet)
         liveviewImg.onload = function() {
             streamActive = true;
             loadingOverlay.classList.remove('show');
-            updateStatus('Streaming', true);
             updateLiveViewButton(true);
             hideError();
 
@@ -540,13 +539,11 @@
 
             // If src is empty, we intentionally stopped - don't show error
             if (liveviewImg.src === '' || liveviewImg.src === window.location.href) {
-                updateStatus('Stopped', false);
                 loadingOverlay.classList.add('show');
                 loadingOverlay.querySelector('div[style]').textContent = 'Live view stopped';
                 hideError();
             } else {
                 // Stream disconnected unexpectedly
-                updateStatus('Disconnected', false);
                 showError('Live view stream disconnected. Click the green button to reconnect.');
                 loadingOverlay.classList.add('show');
                 loadingOverlay.querySelector('div[style]').textContent = 'Disconnected';
@@ -584,7 +581,6 @@
                 // Reload stream with new timestamp
                 loadingOverlay.classList.add('show');
                 loadingOverlay.querySelector('div[style]').textContent = 'Loading stream...';
-                updateStatus('Starting...', false);
                 hideError();
 
                 // Reload camera settings when live view starts (camera must be connected)
@@ -596,7 +592,6 @@
 
             } catch (err) {
                 showError('Failed to start live view: ' + err.message);
-                updateStatus('Error', false);
                 updateLiveViewButton(false);
             }
         }
@@ -618,7 +613,6 @@
                 loadingOverlay.classList.add('show');
                 loadingOverlay.querySelector('div[style]').textContent = 'Live view stopped';
 
-                updateStatus('Stopped', false);
                 updateLiveViewButton(false);
                 hideError();
 
@@ -629,7 +623,6 @@
 
         function refreshStream() {
             loadingOverlay.classList.add('show');
-            updateStatus('Refreshing...', false);
             liveviewImg.src = '/liveview?' + new Date().getTime();
         }
 
@@ -638,15 +631,6 @@
                 document.querySelector('.viewer-container').requestFullscreen();
             } else {
                 document.exitFullscreen();
-            }
-        }
-
-        function updateStatus(text, active) {
-            statusText.textContent = text;
-            if (active) {
-                statusIndicator.classList.add('active');
-            } else {
-                statusIndicator.classList.remove('active');
             }
         }
 
@@ -762,7 +746,6 @@
 
         async function captureImage() {
             try {
-                updateStatus('Capturing...', false);
                 const response = await fetch('/api/capture/single', { method: 'POST' });
 
                 if (!response.ok) {
@@ -772,10 +755,8 @@
 
                 const result = await response.json();
                 showSuccess(`Image captured: ${result.filename} (${(result.size / 1024 / 1024).toFixed(2)} MB)`);
-                updateStatus('Streaming', streamActive);
             } catch (err) {
                 showError('Failed to capture: ' + err.message);
-                updateStatus('Error', false);
             }
         }
 
@@ -793,6 +774,202 @@
 
         // Listen for focus mode changes to update "Set Focus" button
         document.getElementById('focusSelect').addEventListener('change', updateSetFocusButton);
+
+        // Camera Connection Functions
+
+        async function connectCamera() {
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+
+            try {
+                connectBtn.disabled = true;
+                connectBtn.textContent = '🔄 Connecting...';
+
+                const response = await fetch('/api/camera/connect', { method: 'POST' });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || 'Failed to connect to camera');
+                }
+
+                const result = await response.json();
+
+                // Update connection state
+                cameraConnected = true;
+
+                // Update UI
+                updateConnectionUI(true);
+                showSuccess('Camera connected successfully');
+
+                // Load current camera settings
+                await loadCurrentSettings();
+
+                // Start polling for status updates
+                startStatusPolling();
+
+            } catch (err) {
+                showError('Failed to connect: ' + err.message);
+                cameraConnected = false;
+                updateConnectionUI(false);
+            } finally {
+                connectBtn.disabled = false;
+                connectBtn.textContent = '🔌 Connect Camera';
+            }
+        }
+
+        async function disconnectCamera() {
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+
+            try {
+                disconnectBtn.disabled = true;
+                disconnectBtn.textContent = '🔄 Disconnecting...';
+
+                const response = await fetch('/api/camera/disconnect', { method: 'POST' });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || 'Failed to disconnect from camera');
+                }
+
+                // Update connection state
+                cameraConnected = false;
+
+                // Stop status polling
+                stopStatusPolling();
+
+                // Update UI (server already stopped live view)
+                updateConnectionUI(false);
+
+                // Stop the local stream UI if it was active
+                streamActive = false;
+                updateLiveViewButton(false);
+                loadingOverlay.classList.add('show');
+                loadingOverlay.querySelector('div[style]').textContent = 'Live view stopped';
+
+                showSuccess('Camera disconnected');
+
+            } catch (err) {
+                showError('Failed to disconnect: ' + err.message);
+            } finally {
+                disconnectBtn.disabled = false;
+                disconnectBtn.textContent = '🔌 Disconnect Camera';
+            }
+        }
+
+        function updateConnectionUI(connected) {
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            const mainControls = document.getElementById('mainControls');
+            const connectionStatus = document.getElementById('connectionStatus');
+
+            if (connected) {
+                // Hide connect button, show disconnect button
+                connectBtn.style.display = 'none';
+                disconnectBtn.style.display = 'block';
+
+                // Enable main controls
+                mainControls.style.opacity = '1';
+                mainControls.style.pointerEvents = 'auto';
+
+                // Update connection status text
+                connectionStatus.textContent = 'Connected';
+                connectionStatus.style.color = '#4CAF50';
+            } else {
+                // Show connect button, hide disconnect button
+                connectBtn.style.display = 'block';
+                disconnectBtn.style.display = 'none';
+
+                // Disable main controls
+                mainControls.style.opacity = '0.4';
+                mainControls.style.pointerEvents = 'none';
+
+                // Update connection status text
+                connectionStatus.textContent = 'Disconnected';
+                connectionStatus.style.color = '#ff6b6b';
+
+                // Clear camera info
+                document.getElementById('cameraModel').textContent = '—';
+                document.getElementById('cameraModel').style.color = '#888';
+                document.getElementById('batteryLevel').textContent = '—';
+                document.getElementById('batteryLevel').style.color = '#888';
+            }
+        }
+
+        // Status Polling Functions
+
+        function startStatusPolling() {
+            // Clear any existing interval
+            stopStatusPolling();
+
+            // Poll every 5 seconds
+            statusPollInterval = setInterval(updateCameraStatus, 5000);
+
+            // Also update immediately
+            updateCameraStatus();
+        }
+
+        function stopStatusPolling() {
+            if (statusPollInterval) {
+                clearInterval(statusPollInterval);
+                statusPollInterval = null;
+            }
+        }
+
+        async function updateCameraStatus() {
+            try {
+                const response = await fetch('/api/camera/status');
+
+                if (!response.ok) {
+                    // If status check fails, assume disconnected
+                    if (cameraConnected) {
+                        cameraConnected = false;
+                        updateConnectionUI(false);
+                        showError('Camera disconnected unexpectedly');
+                        stopStatusPolling();
+                    }
+                    return;
+                }
+
+                const status = await response.json();
+
+                // Update connection state
+                if (status.connected !== cameraConnected) {
+                    cameraConnected = status.connected;
+                    updateConnectionUI(status.connected);
+
+                    if (!status.connected) {
+                        showError('Camera disconnected');
+                        stopStatusPolling();
+                    }
+                }
+
+                // Update battery level
+                if (status.connected && status.battery !== undefined) {
+                    const batteryLevel = document.getElementById('batteryLevel');
+                    batteryLevel.textContent = status.battery + '%';
+
+                    // Color code battery level
+                    if (status.battery > 30) {
+                        batteryLevel.style.color = '#4CAF50';
+                    } else if (status.battery > 15) {
+                        batteryLevel.style.color = '#ff9800';
+                    } else {
+                        batteryLevel.style.color = '#ff6b6b';
+                    }
+                }
+
+                // Update camera model
+                if (status.connected && status.model) {
+                    const cameraModel = document.getElementById('cameraModel');
+                    cameraModel.textContent = status.model;
+                    cameraModel.style.color = '#fff';
+                }
+
+            } catch (err) {
+                console.error('Failed to update camera status:', err);
+            }
+        }
 
         // Load current camera settings
         async function loadCurrentSettings() {
@@ -861,8 +1038,29 @@
             }
         }
 
-        // Load settings when page loads
-        window.addEventListener('load', loadCurrentSettings);
+        // Check connection status and load settings when page loads
+        window.addEventListener('load', async function() {
+            // Check if camera is already connected
+            try {
+                const response = await fetch('/api/camera/status');
+                if (response.ok) {
+                    const status = await response.json();
+                    if (status.connected) {
+                        cameraConnected = true;
+                        updateConnectionUI(true);
+                        await loadCurrentSettings();
+                        startStatusPolling();
+                    } else {
+                        updateConnectionUI(false);
+                    }
+                } else {
+                    updateConnectionUI(false);
+                }
+            } catch (err) {
+                console.error('Failed to check initial connection status:', err);
+                updateConnectionUI(false);
+            }
+        });
 
         // Focus Adjustment Functions
 
