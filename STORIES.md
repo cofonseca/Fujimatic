@@ -160,7 +160,7 @@
 
 ---
 
-### E-3. Live View (HTTP/MJPEG Streaming) 🔄 IN PROGRESS
+### E-3. Live View (HTTP/MJPEG Streaming) ✅ COMPLETED
 **Status:** Core implementation complete, CLI commands pending
 **Date Started:** 2025-11-14
 **Requirements:**
@@ -180,9 +180,9 @@
 ✅ **Phase 3: HAL Layer** - Extended Camera interface, implemented in RealCamera and FakeCamera
 ✅ **Phase 4: Server API** - Added 3 HTTP handlers for live view control and MJPEG streaming
 ✅ **Phase 5: HTML Viewer** - Created static/liveview.html with modern dark-themed UI
-❌ **Phase 6: CLI Commands** - NOT IMPLEMENTED (interactive mode commands pending)
+❌ **Phase 6: CLI Commands** - Decided not to implement
 ✅ **Phase 7: Client Mode** - Added remote live view methods to pkg/client/camera.go
-❌ **Phase 8: Capture Integration** - NOT IMPLEMENTED (auto-stop before capture pending)
+✅ **Phase 8: Capture Integration** - Done
 
 **C Wrapper Implementation (sdk-c-wrapper/):**
 Added 6 new functions to fm_wrapper.c and fm_wrapper.h:
@@ -700,28 +700,72 @@ This story actually covers TWO distinct focus control features:
 
 ---
 
-#### F-3a. Autofocus Trigger (AF-S) - NOT STARTED
+#### F-3a. Autofocus Trigger (AF-S) - ✅ COMPLETED
+**Date Completed:** 2025-11-15
 **Requirements:**
-- [ ] Identify correct SDK function for triggering single-shot autofocus
-- [ ] Review SDK manual for AF-S trigger (NOT SetFocusOperation)
-- [ ] Implement C wrapper function for AF-S trigger
-- [ ] Add SDK binding in pkg/sdk
-- [ ] Implement in RealCamera, FakeCamera, RemoteCamera
-- [ ] POST /api/focus/trigger endpoint (already exists, needs correct implementation)
-- [ ] Test with real X-T3 camera in AF-S mode
-- [ ] Verify frontend "Set Focus" button works end-to-end
+- [x] Identify correct SDK function for triggering single-shot autofocus
+- [x] Review SDK manual for AF-S trigger (XSDK_Release with S1ON/N_S1OFF)
+- [x] Implement C wrapper function for AF-S trigger
+- [x] Add SDK binding in pkg/sdk
+- [x] Implement in RealCamera, FakeCamera, RemoteCamera
+- [x] POST /api/focus/trigger endpoint working correctly
+- [x] Test with real X-T3 camera in AF-S mode
+- [x] Verify frontend "Set Focus" button works end-to-end
+- [x] Seamless live view restart after autofocus (auto-stop/restart with timing)
 
-**Current Issue:**
-- Attempted to use SetFocusOperation for AF-S trigger - this was incorrect
-- SetFocusOperation is for NEAR/FAR adjustments, not AF-S triggering
-- Need to find the SDK function that simulates half-pressing the shutter button
-- Current implementation returns SDK error -1
+**Solution Summary:**
+
+**SDK Approach:**
+- **Correct Function**: XSDK_Release() with Release Control API
+- **Implementation**: Two-step sequence:
+  1. `XSDK_Release(hCamera, XSDK_RELEASE_S1ON, ...)` - Half-press to trigger AF
+  2. `XSDK_Release(hCamera, XSDK_RELEASE_N_S1OFF, ...)` - Release button to complete
+- **Key Insight**: Release Control API simulates physical shutter button presses (half-press triggers AF)
+
+**Buffer Management:**
+- After autofocus release, SDK buffers preview/AF data preventing live view restart
+- **Solution**: Unconditional buffer draining with multiple DeleteImage() calls
+- **Pattern**: Call DeleteImage() in loop until it returns error (buffer empty)
+- **Timing**: Added 300ms delay after autofocus (from SDK sample code pattern) before restarting live view
+
+**Live View Integration:**
+- Handler auto-stops live view before autofocus
+- Triggers autofocus (with buffer draining)
+- **300ms delay** (NEW - critical fix!)
+- Auto-restarts live view
+
+**Files Modified:**
+- `sdk-c-wrapper/fm_wrapper.c` (lines 1017-1119)
+  - Implemented two-step Release sequence
+  - Added unconditional buffer draining loop
+  - Verbose logging for debugging
+- `pkg/api/handlers.go` (line 484)
+  - Added 300ms delay before restarting live view
+  - Matches SDK sample code timing patterns
+
+**Test Results (2025-11-15):**
+- ✅ Autofocus trigger working with real X-T3 camera
+- ✅ Half-press successful (AF status: 1)
+- ✅ Release successful (N_S1OFF completing properly)
+- ✅ Buffer draining executing (DeleteImage loop working)
+- ✅ 300ms delay allowing SDK state to settle
+- ✅ Live view restarting seamlessly after autofocus
+- ✅ "Set Focus" button working end-to-end from web UI
 
 **Frontend Integration:**
-- ✅ liveview.html "Set Focus" button already implemented (line 379)
+- ✅ liveview.html "Set Focus" button already implemented (line 449)
 - ✅ Button calls POST /api/focus/trigger
 - ✅ Button conditionally enabled only in AF-S/AF-C modes
-- ⏳ Endpoint exists but uses wrong SDK function
+- ✅ Full end-to-end workflow verified
+
+**Key Insights from Implementation:**
+1. **Release Control API** is the correct SDK function for autofocus trigger (not SetFocusOperation)
+2. **Press/Release Sequence** is required: S1ON initiates AF, N_S1OFF releases the button state
+3. **Buffer Management** after autofocus is critical: unconditional DeleteImage() loop drains preview data
+4. **Timing Matters**: 300ms delay (from SDK sample patterns) allows SDK internal state to stabilize before restarting live view
+5. **Seamless UX**: Auto-stopping and auto-restarting live view makes autofocus transparent to user
+
+**Status:** ✅ **FULLY COMPLETE** (9/9 criteria met) - Autofocus trigger working seamlessly with live view
 
 ---
 

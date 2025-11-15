@@ -199,9 +199,14 @@ func (s *Server) handleSettingsISO(w http.ResponseWriter, r *http.Request) {
 		active, err := camera.IsLiveViewActive()
 		if err == nil && active {
 			liveViewWasActive = true
+			logger.Info("Auto-stopping live view before ISO change...")
 			if err := camera.StopLiveView(); err != nil {
-				logger.Error("Failed to stop live view before ISO change: %v", err)
+				logger.Error("Failed to stop live view: %v", err)
 				// Continue with ISO change anyway
+			} else {
+				logger.Info("Live view stopped successfully")
+				// Small delay to ensure live view is fully stopped before proceeding
+				time.Sleep(100 * time.Millisecond)
 			}
 		}
 
@@ -212,9 +217,12 @@ func (s *Server) handleSettingsISO(w http.ResponseWriter, r *http.Request) {
 
 		// Auto-restart live view if it was active before
 		if liveViewWasActive {
+			logger.Info("Auto-restarting live view after ISO change...")
 			if err := camera.StartLiveView(); err != nil {
 				logger.Error("Failed to restart live view after ISO change: %v", err)
 				// Don't fail the ISO change - just log the error
+			} else {
+				logger.Info("Live view restarted successfully")
 			}
 		}
 
@@ -282,9 +290,14 @@ func (s *Server) handleSettingsShutter(w http.ResponseWriter, r *http.Request) {
 		active, err := camera.IsLiveViewActive()
 		if err == nil && active {
 			liveViewWasActive = true
+			logger.Info("Auto-stopping live view before shutter change...")
 			if err := camera.StopLiveView(); err != nil {
-				logger.Error("Failed to stop live view before shutter change: %v", err)
+				logger.Error("Failed to stop live view: %v", err)
 				// Continue with shutter change anyway
+			} else {
+				logger.Info("Live view stopped successfully")
+				// Small delay to ensure live view is fully stopped before proceeding
+				time.Sleep(100 * time.Millisecond)
 			}
 		}
 
@@ -300,9 +313,12 @@ func (s *Server) handleSettingsShutter(w http.ResponseWriter, r *http.Request) {
 
 			// Auto-restart live view if it was active before
 			if liveViewWasActive {
+				logger.Info("Auto-restarting live view after shutter change...")
 				if err := camera.StartLiveView(); err != nil {
 					logger.Error("Failed to restart live view after shutter change: %v", err)
 					// Don't fail the shutter change - just log the error
+				} else {
+					logger.Info("Live view restarted successfully")
 				}
 			}
 
@@ -325,9 +341,12 @@ func (s *Server) handleSettingsShutter(w http.ResponseWriter, r *http.Request) {
 
 		// Auto-restart live view if it was active before
 		if liveViewWasActive {
+			logger.Info("Auto-restarting live view after shutter change...")
 			if err := camera.StartLiveView(); err != nil {
 				logger.Error("Failed to restart live view after shutter change: %v", err)
 				// Don't fail the shutter change - just log the error
+			} else {
+				logger.Info("Live view restarted successfully")
 			}
 		}
 
@@ -392,6 +411,8 @@ func (s *Server) handleSettingsFocus(w http.ResponseWriter, r *http.Request) {
 				// Continue with focus mode change anyway
 			} else {
 				logger.Info("Live view stopped successfully")
+				// Small delay to ensure live view is fully stopped before proceeding
+				time.Sleep(100 * time.Millisecond)
 			}
 		}
 
@@ -437,9 +458,35 @@ func (s *Server) handleFocusTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auto-stop live view if active (required for autofocus triggering)
+	var liveViewWasActive bool
+	active, err := camera.IsLiveViewActive()
+	if err == nil && active {
+		liveViewWasActive = true
+		logger.Info("Auto-stopping live view before autofocus trigger...")
+		if err := camera.StopLiveView(); err != nil {
+			logger.Error("Failed to stop live view: %v", err)
+			// Continue with autofocus anyway
+		} else {
+			logger.Info("Live view stopped successfully")
+		}
+	}
+
 	if err := camera.TriggerAutoFocus(); err != nil {
 		s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to trigger autofocus: %v", err))
 		return
+	}
+
+	// Auto-restart live view if it was active before
+	if liveViewWasActive {
+		// Wait 300ms for the SDK to settle after autofocus operation
+		// The SDK sample code uses similar delays between operations
+		time.Sleep(300 * time.Millisecond)
+
+		if err := camera.StartLiveView(); err != nil {
+			logger.Error("Failed to restart live view after autofocus: %v", err)
+			// Don't fail the autofocus trigger - just log the error
+		}
 	}
 
 	s.sendJSON(w, http.StatusOK, FocusTriggerResponse{

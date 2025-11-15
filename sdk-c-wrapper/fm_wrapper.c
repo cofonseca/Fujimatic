@@ -1021,28 +1021,98 @@ int fm_trigger_autofocus() {
     }
 
     if (verbose_logging) {
-        printf("Triggering autofocus operation...\n");
+        printf("Triggering autofocus via half-press shutter (S1ON)...\n");
     }
 
-    // Trigger autofocus using XSDK_SetProp
-    // API: XSDK_SetProp(hCamera, API_CODE_SetFocusOperation, API_PARAM, lSetting, lDirection, lSpeed)
-    // For autofocus trigger: Use minimal valid values (direction=NEAR, speed=1)
-    long result = XSDK_SetProp(
-        g_hCamera,
-        API_CODE_SetFocusOperation,
-        3,  // API_PARAM_SetFocusOperation = 3
-        SDK_FOCUS_OPERATION_START,
-        SDK_FOCUS_DIRECTION_NEAR,  // Use NEAR (0x0000) as default
-        1   // Use minimal speed
-    );
+    // Trigger autofocus using XSDK_Release with proper half-press and release sequence
+    // Per SDK Release Control API:
+    // XSDK_RELEASE_S1ON = 0x0200 = "Shutter button pressed halfway" (triggers AF)
+    // XSDK_RELEASE_N_S1OFF = 0x0004 = "Release from halfway state"
+    long shot_opt = 0;
+    long af_status = 0;
+
+    // Step 1: Half-press to trigger autofocus
+    if (verbose_logging) {
+        printf("  Step 1: Pressing shutter halfway (S1ON)...\n");
+    }
+    long result = XSDK_Release(g_hCamera, XSDK_RELEASE_S1ON, &shot_opt, &af_status);
 
     if (result != 0) {
-        fprintf(stderr, "fm_trigger_autofocus: XSDK_SetProp failed with code %ld\n", result);
+        // Get detailed error information
+        long api_code = 0;
+        long err_code = 0;
+        XSDK_GetErrorNumber(g_hCamera, &api_code, &err_code);
+
+        fprintf(stderr, "fm_trigger_autofocus: XSDK_Release(S1ON) failed\n");
+        fprintf(stderr, "  Return code: %ld\n", result);
+        fprintf(stderr, "  API code: %ld (0x%04lX)\n", api_code, api_code);
+        fprintf(stderr, "  Error code: %ld (0x%04lX)\n", err_code, err_code);
+
+        if (err_code == 0x8002) {
+            fprintf(stderr, "  -> Camera is BUSY (try again)\n");
+        } else if (err_code == 0x8004) {
+            fprintf(stderr, "  -> Not supported in this mode (ensure AF-S focus mode is active)\n");
+        }
+
         return -2;
     }
 
     if (verbose_logging) {
-        printf("Autofocus triggered successfully\n");
+        printf("  Half-press successful (AF status: %ld, shot_opt: %ld)\n", af_status, shot_opt);
+    }
+
+    // Step 2: Release the half-press to complete the operation
+    // This prevents the camera from remaining in "shutter pressed" state
+    if (verbose_logging) {
+        printf("  Step 2: Releasing shutter (N_S1OFF)...\n");
+    }
+    result = XSDK_Release(g_hCamera, XSDK_RELEASE_N_S1OFF, &shot_opt, &af_status);
+
+    if (result != 0) {
+        // Get detailed error information
+        long api_code = 0;
+        long err_code = 0;
+        XSDK_GetErrorNumber(g_hCamera, &api_code, &err_code);
+
+        fprintf(stderr, "fm_trigger_autofocus: XSDK_Release(N_S1OFF) failed\n");
+        fprintf(stderr, "  Return code: %ld\n", result);
+        fprintf(stderr, "  API code: %ld (0x%04lX)\n", api_code, api_code);
+        fprintf(stderr, "  Error code: %ld (0x%04lX)\n", err_code, err_code);
+
+        // Note: This is less critical than the press, but still worth reporting
+        return -3;
+    }
+
+    // Step 3: Clear the image buffer
+    // The SDK may have buffered preview/AF data after autofocus operation
+    // We need to clear it before live view can restart
+    // Note: ReadImageInfo may not detect buffered preview frames, so we
+    // unconditionally call DeleteImage multiple times to drain the buffer
+    if (verbose_logging) {
+        printf("  Step 3: Draining image buffer...\n");
+    }
+
+    // Call DeleteImage multiple times to ensure buffer is completely empty
+    // The SDK doesn't always report buffered preview data via ReadImageInfo,
+    // so we make multiple unconditional delete calls
+    int max_deletes = 10; // Should be more than enough for any buffered frames
+    for (int i = 0; i < max_deletes; i++) {
+        result = XSDK_DeleteImage(g_hCamera);
+        if (verbose_logging) {
+            if (result == 0) {
+                printf("  DeleteImage[%d] succeeded\n", i);
+            } else {
+                printf("  DeleteImage[%d] returned %ld (buffer likely empty now)\n", i, result);
+                break; // Stop when DeleteImage fails (buffer is empty)
+            }
+        } else {
+            // Without verbose logging, just stop on first error
+            if (result != 0) break;
+        }
+    }
+
+    if (verbose_logging) {
+        printf("Autofocus triggered successfully and buffer cleared\n");
     }
 
     return 0;
