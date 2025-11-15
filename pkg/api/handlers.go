@@ -350,6 +350,78 @@ func (s *Server) handleSettingsFocus(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Focus Operations Handlers
+
+// handleFocusTrigger triggers a single-shot autofocus operation
+func (s *Server) handleFocusTrigger(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.sendError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	camera := s.state.GetCamera()
+	if !camera.IsConnected() {
+		s.sendError(w, http.StatusServiceUnavailable, "Camera not connected")
+		return
+	}
+
+	if err := camera.TriggerAutoFocus(); err != nil {
+		s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to trigger autofocus: %v", err))
+		return
+	}
+
+	s.sendJSON(w, http.StatusOK, FocusTriggerResponse{
+		Status:     "ok",
+		Message:    "Autofocus triggered successfully",
+		StatusCode: 200,
+	})
+}
+
+// handleFocusAdjust adjusts focus manually in NEAR or FAR direction
+func (s *Server) handleFocusAdjust(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.sendError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	camera := s.state.GetCamera()
+	if !camera.IsConnected() {
+		s.sendError(w, http.StatusServiceUnavailable, "Camera not connected")
+		return
+	}
+
+	var req FocusAdjustRequest
+	if err := s.parseJSON(r, &req); err != nil {
+		s.sendError(w, http.StatusBadRequest, "Invalid JSON request")
+		return
+	}
+
+	// Validate direction
+	if req.Direction != "near" && req.Direction != "far" {
+		s.sendError(w, http.StatusBadRequest, "Invalid direction (must be 'near' or 'far')")
+		return
+	}
+
+	// Validate steps (must be positive)
+	if req.Steps <= 0 {
+		s.sendError(w, http.StatusBadRequest, "Invalid steps (must be positive)")
+		return
+	}
+
+	if err := camera.AdjustFocus(req.Direction, req.Steps); err != nil {
+		s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to adjust focus: %v", err))
+		return
+	}
+
+	s.sendJSON(w, http.StatusOK, FocusAdjustResponse{
+		Status:     "ok",
+		Message:    fmt.Sprintf("Focus adjusted %s by %d steps", req.Direction, req.Steps),
+		Direction:  req.Direction,
+		Steps:      req.Steps,
+		StatusCode: 200,
+	})
+}
+
 // Session Management Handlers
 
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {

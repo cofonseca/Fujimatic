@@ -280,6 +280,51 @@ func (r *RealCamera) GetSupportedFocusModes() ([]int, error) {
 	return intModes, nil
 }
 
+// AdjustFocus makes a manual focus adjustment using relative position steps
+// direction: "near" (closer) or "far" (farther)
+// steps: number of focus steps to move (positive integer)
+func (r *RealCamera) AdjustFocus(direction string, steps int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	if r.sdkCamera == nil {
+		return fmt.Errorf("SDK camera not initialized")
+	}
+
+	// Convert string direction to sdk.FocusDirection
+	var dir sdk.FocusDirection
+	switch direction {
+	case "near":
+		dir = sdk.FocusDirectionNear
+	case "far":
+		dir = sdk.FocusDirectionFar
+	default:
+		return fmt.Errorf("invalid focus direction: %s (must be \"near\" or \"far\")", direction)
+	}
+
+	return r.sdkCamera.AdjustFocus(dir, steps)
+}
+
+// TriggerAutoFocus triggers a single-shot autofocus operation
+func (r *RealCamera) TriggerAutoFocus() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	if r.sdkCamera == nil {
+		return fmt.Errorf("SDK camera not initialized")
+	}
+
+	return r.sdkCamera.TriggerAutoFocus()
+}
+
 // Capture triggers a photo capture
 func (r *RealCamera) Capture() error {
 	r.mu.Lock()

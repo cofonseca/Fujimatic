@@ -282,6 +282,49 @@ func (f *FakeCamera) GetSupportedFocusModes() ([]int, error) {
 	}, nil
 }
 
+// AdjustFocus makes a manual focus adjustment (fake implementation)
+// direction: "near" (closer) or "far" (farther)
+// steps: number of focus steps to move (positive integer)
+func (f *FakeCamera) AdjustFocus(direction string, steps int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	// Validate direction
+	if direction != "near" && direction != "far" {
+		return fmt.Errorf("invalid focus direction: %s (must be \"near\" or \"far\")", direction)
+	}
+
+	// Validate steps
+	if steps <= 0 {
+		return fmt.Errorf("invalid focus steps: %d (must be positive)", steps)
+	}
+
+	fmt.Printf("Fake camera: Adjusting focus %s by %d steps\n", direction, steps)
+	return nil
+}
+
+// TriggerAutoFocus triggers a single-shot autofocus operation (fake implementation)
+func (f *FakeCamera) TriggerAutoFocus() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	// Check if in autofocus mode
+	if f.focusMode == 0x0001 {
+		return fmt.Errorf("autofocus trigger only works in AF-S or AF-C mode (currently in Manual)")
+	}
+
+	fmt.Println("Fake camera: Autofocus triggered")
+	return nil
+}
+
 // Capture triggers a photo capture
 func (f *FakeCamera) Capture() error {
 	f.mu.Lock()

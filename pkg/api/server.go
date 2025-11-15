@@ -67,6 +67,10 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/settings/shutter", s.handleSettingsShutter)
 	mux.HandleFunc("/api/settings/focus", s.handleSettingsFocus)
 
+	// Focus Operations
+	mux.HandleFunc("/api/focus/trigger", s.handleFocusTrigger)
+	mux.HandleFunc("/api/focus/adjust", s.handleFocusAdjust)
+
 	// Session Management
 	mux.HandleFunc("/api/session", s.handleSession)
 	mux.HandleFunc("/api/session/start", s.handleSessionStart)

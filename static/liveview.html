@@ -207,6 +207,136 @@
             font-weight: 600;
             color: #fff;
         }
+
+        .camera-controls {
+            background: #222;
+            padding: 20px;
+            border-radius: 6px;
+            border: 1px solid #333;
+            margin-top: 30px;
+        }
+
+        .control-row {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+            align-items: flex-end;
+        }
+
+        .control-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .control-group {
+            flex: 1;
+            min-width: 200px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .control-group label {
+            font-size: 0.9rem;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .control-group select {
+            padding: 10px;
+            background: #333;
+            color: #fff;
+            border: 1px solid #444;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .control-group select:focus {
+            outline: none;
+            border-color: #4CAF50;
+        }
+
+        .control-group button {
+            min-width: 100px;
+        }
+
+        h2 {
+            margin-top: 30px;
+            margin-bottom: 15px;
+            font-size: 1.5rem;
+        }
+
+        /* Focus Slider Styles */
+        .focus-slider-container {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 10px;
+        }
+
+        .slider-label {
+            font-size: 0.85rem;
+            color: #888;
+            font-weight: 600;
+            min-width: 35px;
+            text-align: center;
+        }
+
+        .focus-slider {
+            flex: 1;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 8px;
+            background: linear-gradient(to right, #ff6b6b 0%, #666 50%, #4CAF50 100%);
+            border-radius: 5px;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .focus-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 24px;
+            height: 24px;
+            background: #fff;
+            border: 2px solid #4CAF50;
+            border-radius: 50%;
+            cursor: grab;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            transition: all 0.2s;
+        }
+
+        .focus-slider::-webkit-slider-thumb:hover {
+            transform: scale(1.1);
+            box-shadow: 0 3px 8px rgba(76, 175, 80, 0.5);
+        }
+
+        .focus-slider::-webkit-slider-thumb:active {
+            cursor: grabbing;
+            transform: scale(0.95);
+        }
+
+        .focus-slider::-moz-range-thumb {
+            width: 24px;
+            height: 24px;
+            background: #fff;
+            border: 2px solid #4CAF50;
+            border-radius: 50%;
+            cursor: grab;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            transition: all 0.2s;
+        }
+
+        .focus-slider::-moz-range-thumb:hover {
+            transform: scale(1.1);
+            box-shadow: 0 3px 8px rgba(76, 175, 80, 0.5);
+        }
+
+        .focus-slider::-moz-range-thumb:active {
+            cursor: grabbing;
+            transform: scale(0.95);
+        }
     </style>
 </head>
 <body>
@@ -227,8 +357,7 @@
         </div>
 
         <div class="controls">
-            <button id="startBtn" onclick="startLiveView()">▶ Start Live View</button>
-            <button id="stopBtn" onclick="stopLiveView()" class="secondary">⏹ Stop Live View</button>
+            <button id="liveViewToggleBtn" onclick="toggleLiveView()" style="background: #4CAF50;">▶ Start Live View</button>
             <button onclick="toggleFullscreen()" class="secondary">⛶ Fullscreen</button>
             <button onclick="refreshStream()" class="secondary">↻ Refresh</button>
         </div>
@@ -258,6 +387,129 @@
                 <div class="info-card-value">Medium Quality</div>
             </div>
         </div>
+
+        <h2>📷 Camera Controls</h2>
+
+        <div class="camera-controls">
+            <div class="control-row">
+                <div class="control-group">
+                    <label for="isoSelect">ISO</label>
+                    <select id="isoSelect">
+                        <option value="100">100</option>
+                        <option value="200">200</option>
+                        <option value="400">400</option>
+                        <option value="800">800</option>
+                        <option value="1600">1600</option>
+                        <option value="3200">3200</option>
+                        <option value="6400">6400</option>
+                        <option value="12800">12800</option>
+                    </select>
+                </div>
+                <button onclick="setISO()" class="secondary">Set ISO</button>
+            </div>
+
+            <div class="control-row">
+                <div class="control-group">
+                    <label for="shutterSelect">Shutter Speed</label>
+                    <select id="shutterSelect">
+                        <option value="1/8000">1/8000</option>
+                        <option value="1/4000">1/4000</option>
+                        <option value="1/2000">1/2000</option>
+                        <option value="1/1000">1/1000</option>
+                        <option value="1/500">1/500</option>
+                        <option value="1/250">1/250</option>
+                        <option value="1/125">1/125</option>
+                        <option value="1/60">1/60</option>
+                        <option value="1/30">1/30</option>
+                        <option value="1/15">1/15</option>
+                        <option value="1/8">1/8</option>
+                        <option value="1/4">1/4</option>
+                        <option value="1/2">1/2</option>
+                        <option value="1">1</option>
+                        <option value="2">2</option>
+                        <option value="4">4</option>
+                        <option value="8">8</option>
+                        <option value="15">15</option>
+                        <option value="30">30</option>
+                    </select>
+                </div>
+                <button onclick="setShutter()" class="secondary">Set Shutter</button>
+            </div>
+
+            <div class="control-row">
+                <div class="control-group">
+                    <label for="focusSelect">Focus Mode</label>
+                    <select id="focusSelect">
+                        <option value="manual">Manual</option>
+                        <option value="auto">AF-S (Single)</option>
+                        <option value="auto_continuous">AF-C (Continuous)</option>
+                    </select>
+                </div>
+                <button onclick="setFocus()" class="secondary">Set Focus Mode</button>
+                <button id="setFocusBtn" onclick="triggerAutoFocus()" class="secondary" disabled>Set Focus</button>
+            </div>
+
+            <div class="control-row">
+                <button onclick="captureImage()" style="background: #ff6b35; flex: 1;">📸 Capture Image</button>
+            </div>
+        </div>
+
+        <h2 style="opacity: 0.5;">🎯 Manual Focus Adjustments</h2>
+        <p class="subtitle" style="margin-bottom: 10px; opacity: 0.5; text-decoration: line-through;">Fine-tune focus for astrophotography (works in manual focus mode)</p>
+
+        <div style="background: #2a2a2a; border: 2px dashed #555; border-radius: 8px; padding: 15px; margin-bottom: 15px;">
+            <p style="color: #ff6b6b; margin: 0 0 8px 0; font-weight: bold;">⚠️ Feature Not Available</p>
+            <p style="color: #aaa; margin: 0; font-size: 0.9rem; line-height: 1.5;">
+                Programmatic focus adjustments require lenses that expose focus position data to the Fujifilm SDK.
+                The XF 18-55mm and XF 50-140mm lenses do not support this feature.
+                <strong>Use the camera's manual focus ring</strong> with live view magnification for precise focusing.
+            </p>
+        </div>
+
+        <div class="camera-controls" style="opacity: 0.3; pointer-events: none;">
+            <!-- Fine Adjustment Buttons -->
+            <div class="control-row">
+                <div style="flex: 1; text-align: center;">
+                    <label style="display: block; margin-bottom: 10px; color: #888; font-size: 0.9rem;">FINE ADJUSTMENTS (Speed 1)</label>
+                    <div style="display: flex; gap: 10px; justify-content: center;">
+                        <button class="secondary" style="min-width: 100px;" disabled>◄ FAR -1</button>
+                        <button class="secondary" style="min-width: 100px;" disabled>NEAR +1 ►</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bidirectional Slider -->
+            <div class="control-row">
+                <div style="flex: 1;">
+                    <label style="display: block; margin-bottom: 10px; color: #888; font-size: 0.9rem;">COARSE SLIDER (Drag & Release)</label>
+                    <div class="focus-slider-container">
+                        <span class="slider-label">FAR</span>
+                        <input type="range" id="focusSlider" min="-8" max="8" value="0" step="1" class="focus-slider" disabled>
+                        <span class="slider-label">NEAR</span>
+                    </div>
+                    <div style="text-align: center; margin-top: 8px; color: #888; font-size: 0.85rem;">
+                        Speed: <span id="sliderSpeed">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Explicit Controls (Speed Dial + Direction Buttons) -->
+            <div class="control-row">
+                <div class="control-group">
+                    <label for="focusStepsSelect">Focus Steps</label>
+                    <select id="focusStepsSelect" disabled>
+                        <option value="1" selected>1 - Fine</option>
+                        <option value="5">5</option>
+                        <option value="10">10</option>
+                        <option value="20">20</option>
+                        <option value="50">50</option>
+                        <option value="100">100 - Coarse</option>
+                    </select>
+                </div>
+                <button class="secondary" disabled>◄ FAR</button>
+                <button class="secondary" disabled>NEAR ►</button>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -275,11 +527,16 @@
             streamActive = true;
             loadingOverlay.classList.remove('show');
             updateStatus('Streaming', true);
+            updateLiveViewButton(true);
             hideError();
+
+            // Reload camera settings when stream starts (camera is connected)
+            loadCurrentSettings();
         };
 
         liveviewImg.onerror = function() {
             streamActive = false;
+            updateLiveViewButton(false);
 
             // If src is empty, we intentionally stopped - don't show error
             if (liveviewImg.src === '' || liveviewImg.src === window.location.href) {
@@ -290,11 +547,30 @@
             } else {
                 // Stream disconnected unexpectedly
                 updateStatus('Disconnected', false);
-                showError('Live view stream disconnected. Click "Start Live View" to reconnect.');
+                showError('Live view stream disconnected. Click the green button to reconnect.');
                 loadingOverlay.classList.add('show');
                 loadingOverlay.querySelector('div[style]').textContent = 'Disconnected';
             }
         };
+
+        function toggleLiveView() {
+            if (streamActive) {
+                stopLiveView();
+            } else {
+                startLiveView();
+            }
+        }
+
+        function updateLiveViewButton(isActive) {
+            const btn = document.getElementById('liveViewToggleBtn');
+            if (isActive) {
+                btn.textContent = '⏹ Stop Live View';
+                btn.style.background = '#f44336'; // Red
+            } else {
+                btn.textContent = '▶ Start Live View';
+                btn.style.background = '#4CAF50'; // Green
+            }
+        }
 
         async function startLiveView() {
             try {
@@ -311,6 +587,9 @@
                 updateStatus('Starting...', false);
                 hideError();
 
+                // Reload camera settings when live view starts (camera must be connected)
+                loadCurrentSettings();
+
                 setTimeout(() => {
                     liveviewImg.src = '/liveview?' + new Date().getTime();
                 }, 500);
@@ -318,6 +597,7 @@
             } catch (err) {
                 showError('Failed to start live view: ' + err.message);
                 updateStatus('Error', false);
+                updateLiveViewButton(false);
             }
         }
 
@@ -339,6 +619,7 @@
                 loadingOverlay.querySelector('div[style]').textContent = 'Live view stopped';
 
                 updateStatus('Stopped', false);
+                updateLiveViewButton(false);
                 hideError();
 
             } catch (err) {
@@ -377,6 +658,270 @@
         function hideError() {
             errorDiv.classList.remove('show');
         }
+
+        function showSuccess(message) {
+            // Reuse error div for success messages (green styling)
+            errorDiv.textContent = '✓ ' + message;
+            errorDiv.style.background = '#1a4a1a';
+            errorDiv.style.color = '#4CAF50';
+            errorDiv.style.borderLeftColor = '#4CAF50';
+            errorDiv.classList.add('show');
+
+            // Auto-hide after 3 seconds
+            setTimeout(() => {
+                errorDiv.classList.remove('show');
+                // Reset to error styling
+                errorDiv.style.background = '';
+                errorDiv.style.color = '';
+                errorDiv.style.borderLeftColor = '';
+            }, 3000);
+        }
+
+        // Camera Control Functions
+
+        async function setISO() {
+            const iso = parseInt(document.getElementById('isoSelect').value);
+            try {
+                const response = await fetch('/api/settings/iso', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ iso: iso })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || 'Failed to set ISO');
+                }
+
+                showSuccess(`ISO set to ${iso}`);
+            } catch (err) {
+                showError('Failed to set ISO: ' + err.message);
+            }
+        }
+
+        async function setShutter() {
+            const shutter = document.getElementById('shutterSelect').value;
+            try {
+                const response = await fetch('/api/settings/shutter', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ shutter: shutter })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || 'Failed to set shutter speed');
+                }
+
+                showSuccess(`Shutter speed set to ${shutter}`);
+            } catch (err) {
+                showError('Failed to set shutter: ' + err.message);
+            }
+        }
+
+        async function setFocus() {
+            const focus = document.getElementById('focusSelect').value;
+            try {
+                const response = await fetch('/api/settings/focus', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ focus_mode: focus })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || 'Failed to set focus mode');
+                }
+
+                const focusName = focus === 'manual' ? 'Manual' : (focus === 'auto' ? 'AF-S' : 'AF-C');
+                showSuccess(`Focus mode set to ${focusName}`);
+
+                // Update "Set Focus" button state
+                updateSetFocusButton();
+            } catch (err) {
+                showError('Failed to set focus: ' + err.message);
+            }
+        }
+
+        async function triggerAutoFocus() {
+            try {
+                const response = await fetch('/api/focus/trigger', {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || 'Failed to trigger autofocus');
+                }
+
+                showSuccess('Autofocus triggered');
+            } catch (err) {
+                showError('Failed to trigger autofocus: ' + err.message);
+            }
+        }
+
+        async function captureImage() {
+            try {
+                updateStatus('Capturing...', false);
+                const response = await fetch('/api/capture/single', { method: 'POST' });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || 'Failed to capture');
+                }
+
+                const result = await response.json();
+                showSuccess(`Image captured: ${result.filename} (${(result.size / 1024 / 1024).toFixed(2)} MB)`);
+                updateStatus('Streaming', streamActive);
+            } catch (err) {
+                showError('Failed to capture: ' + err.message);
+                updateStatus('Error', false);
+            }
+        }
+
+        function updateSetFocusButton() {
+            const focusMode = document.getElementById('focusSelect').value;
+            const setFocusBtn = document.getElementById('setFocusBtn');
+
+            // Enable "Set Focus" button only when in automatic mode
+            if (focusMode === 'auto' || focusMode === 'auto_continuous') {
+                setFocusBtn.disabled = false;
+            } else {
+                setFocusBtn.disabled = true;
+            }
+        }
+
+        // Listen for focus mode changes to update "Set Focus" button
+        document.getElementById('focusSelect').addEventListener('change', updateSetFocusButton);
+
+        // Load current camera settings
+        async function loadCurrentSettings() {
+            try {
+                console.log('Loading current camera settings...');
+
+                // Check if camera is connected first
+                const statusResponse = await fetch('/api/camera/status');
+                if (!statusResponse.ok) {
+                    console.warn('Camera not connected, skipping settings load');
+                    return;
+                }
+
+                const statusData = await statusResponse.json();
+                if (!statusData.connected) {
+                    console.warn('Camera status shows not connected');
+                    return;
+                }
+
+                console.log('Camera connected, loading settings...');
+
+                // Load ISO
+                const isoResponse = await fetch('/api/settings/iso');
+                if (isoResponse.ok) {
+                    const isoData = await isoResponse.json();
+                    const isoSelect = document.getElementById('isoSelect');
+                    isoSelect.value = isoData.iso;
+                    console.log('ISO loaded:', isoData.iso);
+                } else {
+                    console.error('Failed to load ISO:', isoResponse.status);
+                }
+
+                // Load Shutter Speed
+                const shutterResponse = await fetch('/api/settings/shutter');
+                if (shutterResponse.ok) {
+                    const shutterData = await shutterResponse.json();
+                    console.log('Shutter data received:', shutterData);
+                    const shutterSelect = document.getElementById('shutterSelect');
+
+                    // The API returns shutter_speed which is the photographic notation
+                    if (shutterData.shutter_speed) {
+                        console.log('Setting shutter to:', shutterData.shutter_speed);
+                        shutterSelect.value = shutterData.shutter_speed;
+                        console.log('Shutter dropdown value after set:', shutterSelect.value);
+                    }
+                } else {
+                    console.error('Failed to load shutter:', shutterResponse.status);
+                }
+
+                // Load Focus Mode
+                const focusResponse = await fetch('/api/settings/focus');
+                if (focusResponse.ok) {
+                    const focusData = await focusResponse.json();
+                    const focusSelect = document.getElementById('focusSelect');
+                    focusSelect.value = focusData.focus_mode;
+                    console.log('Focus mode loaded:', focusData.focus_mode);
+                    // Update "Set Focus" button based on current mode
+                    updateSetFocusButton();
+                } else {
+                    console.error('Failed to load focus:', focusResponse.status);
+                }
+
+                console.log('Settings load complete');
+            } catch (err) {
+                console.error('Failed to load current settings:', err);
+            }
+        }
+
+        // Load settings when page loads
+        window.addEventListener('load', loadCurrentSettings);
+
+        // Focus Adjustment Functions
+
+        async function adjustFocus(direction, steps) {
+            try {
+                const response = await fetch('/api/focus/adjust', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        direction: direction,
+                        steps: steps
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || 'Failed to adjust focus');
+                }
+
+                const result = await response.json();
+                const directionLabel = direction === 'far' ? 'FAR' : 'NEAR';
+                showSuccess(`Focus adjusted ${directionLabel} by ${steps} steps`);
+            } catch (err) {
+                showError('Failed to adjust focus: ' + err.message);
+            }
+        }
+
+        function adjustFocusExplicit(direction) {
+            const steps = parseInt(document.getElementById('focusStepsSelect').value);
+            adjustFocus(direction, steps);
+        }
+
+        // Focus Slider Handling
+        const focusSlider = document.getElementById('focusSlider');
+        const sliderSpeedDisplay = document.getElementById('sliderSpeed');
+
+        // Update steps display as slider moves
+        focusSlider.addEventListener('input', function() {
+            const value = parseInt(this.value);
+            sliderSpeedDisplay.textContent = Math.abs(value);
+        });
+
+        // Send focus adjustment when slider is released
+        focusSlider.addEventListener('change', function() {
+            const value = parseInt(this.value);
+
+            if (value !== 0) {
+                const direction = value > 0 ? 'near' : 'far';
+                const steps = Math.abs(value);
+
+                adjustFocus(direction, steps);
+
+                // Reset slider to center after brief delay
+                setTimeout(() => {
+                    this.value = 0;
+                    sliderSpeedDisplay.textContent = '0';
+                }, 200);
+            }
+        });
 
         // Stream will start when user clicks "Start Live View" button
     </script>

@@ -51,6 +51,16 @@ type Camera interface {
 	// GetSupportedFocusModes returns the list of focus modes supported by the attached lens
 	GetSupportedFocusModes() ([]int, error)
 
+	// AdjustFocus makes a manual focus adjustment using relative position steps
+	// direction: "near" (closer) or "far" (farther)
+	// steps: number of focus steps to move (positive integer)
+	// Useful for astrophotography where autofocus can't lock on dim stars
+	AdjustFocus(direction string, steps int) error
+
+	// TriggerAutoFocus triggers a single-shot autofocus operation
+	// Only works when camera is in automatic focus mode (AF-S or AF-C)
+	TriggerAutoFocus() error
+
 	// Capture triggers a photo capture
 	Capture() error
 

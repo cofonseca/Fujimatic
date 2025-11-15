@@ -161,6 +161,27 @@ type LiveViewStopResponse struct {
 	StatusCode int    `json:"status_code"`
 }
 
+// Focus Operations
+
+type FocusTriggerResponse struct {
+	Status     string `json:"status"`
+	Message    string `json:"message"`
+	StatusCode int    `json:"status_code"`
+}
+
+type FocusAdjustRequest struct {
+	Direction string `json:"direction"` // "near" or "far"
+	Steps     int    `json:"steps"`     // Number of focus steps to move (positive integer)
+}
+
+type FocusAdjustResponse struct {
+	Status     string `json:"status"`
+	Message    string `json:"message"`
+	Direction  string `json:"direction"`
+	Steps      int    `json:"steps"`
+	StatusCode int    `json:"status_code"`
+}
+
 // Error Response
 
 type ErrorResponse struct {

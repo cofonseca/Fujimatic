@@ -23,6 +23,8 @@ int fm_get_supported_shutter_speeds(int* count, int* speeds);
 int fm_get_focus_mode(int* mode);
 int fm_set_focus_mode(int mode);
 int fm_get_supported_focus_modes(int* count, int* modes);
+int fm_adjust_focus(int direction, int steps);
+int fm_trigger_autofocus();
 int fm_set_verbose(int enabled);
 
 // Live view functions

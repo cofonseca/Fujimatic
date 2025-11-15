@@ -280,6 +280,25 @@ func (f FocusMode) String() string {
 	}
 }
 
+// FocusDirection represents focus adjustment direction
+type FocusDirection int
+
+const (
+	FocusDirectionNear FocusDirection = 0 // Adjust focus closer (NEAR)
+	FocusDirectionFar  FocusDirection = 1 // Adjust focus farther (FAR)
+)
+
+func (d FocusDirection) String() string {
+	switch d {
+	case FocusDirectionNear:
+		return "NEAR"
+	case FocusDirectionFar:
+		return "FAR"
+	default:
+		return "Unknown"
+	}
+}
+
 // GetFocusMode returns the current focus mode
 func (c *Camera) GetFocusMode() (FocusMode, error) {
 	if !c.connected {
@@ -344,6 +363,46 @@ func (c *Camera) GetSupportedFocusModes() ([]FocusMode, error) {
 	}
 
 	return goModes, nil
+}
+
+// AdjustFocus makes a manual focus adjustment using relative position steps
+// direction: FocusDirectionNear (closer) or FocusDirectionFar (farther)
+// steps: number of focus steps to move (positive integer)
+// Useful for astrophotography where autofocus can't lock on dim stars
+func (c *Camera) AdjustFocus(direction FocusDirection, steps int) error {
+	if !c.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	// Validate direction
+	if direction != FocusDirectionNear && direction != FocusDirectionFar {
+		return fmt.Errorf("invalid focus direction: %d (must be NEAR=0 or FAR=1)", direction)
+	}
+
+	// Validate steps
+	if steps <= 0 {
+		return fmt.Errorf("invalid focus steps: %d (must be positive)", steps)
+	}
+
+	result := C.fm_adjust_focus(C.int(direction), C.int(steps))
+	if result == 0 {
+		return nil
+	}
+	return fmt.Errorf("failed to adjust focus, code: %d", result)
+}
+
+// TriggerAutoFocus triggers a single-shot autofocus operation
+// Only works when camera is in automatic focus mode (AF-S or AF-C)
+func (c *Camera) TriggerAutoFocus() error {
+	if !c.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	result := C.fm_trigger_autofocus()
+	if result == 0 {
+		return nil
+	}
+	return fmt.Errorf("failed to trigger autofocus, code: %d", result)
 }
 
 // Capture triggers a photo capture

@@ -337,6 +337,13 @@ int fm_set_shutter(int microseconds) {
         return -2;
     }
 
+    // Set Manual exposure mode first (required for SDK operations)
+    long mode_result = XSDK_SetAEMode(g_hCamera, 0x0001);
+    if (mode_result != 0) {
+        fprintf(stderr, "fm_set_shutter: Failed to set Manual exposure mode: %ld\n", mode_result);
+        return -5;
+    }
+
     // Check if camera supports shutter control
     long num_speeds = 0;
     long result = XSDK_CapShutterSpeed(g_hCamera, &num_speeds, NULL, NULL);
@@ -490,10 +497,17 @@ int fm_set_iso(int iso) {
         return -2;
     }
 
+    // Set Manual exposure mode first (required for SDK operations)
+    long mode_result = XSDK_SetAEMode(g_hCamera, 0x0001);
+    if (mode_result != 0) {
+        fprintf(stderr, "fm_set_iso: Failed to set Manual exposure mode: %ld\n", mode_result);
+        return -3;
+    }
+
     long result = XSDK_SetSensitivity(g_hCamera, (long)iso);
     if (result != 0) {
         fprintf(stderr, "fm_set_iso: XSDK_SetSensitivity failed with code: %ld\n", result);
-        return -3;
+        return -4;
     }
 
     printf("ISO set to %d\n", iso);
@@ -869,6 +883,168 @@ int fm_set_focus_mode(int mode) {
     if (verbose_logging) {
         printf("Focus mode set successfully\n");
     }
+    return 0;
+}
+
+// Adjust focus manually (NEAR or FAR) using relative position steps
+// direction: 0 = NEAR (closer), 1 = FAR (farther)
+// steps: number of focus steps to move (positive integer)
+// Returns: 0 on success, negative on error
+int fm_adjust_focus(int direction, int steps) {
+    if (g_hCamera == NULL) {
+        fprintf(stderr, "fm_adjust_focus: Camera not connected\n");
+        return -1;
+    }
+
+    // Validate direction (0=NEAR, 1=FAR)
+    if (direction < 0 || direction > 1) {
+        fprintf(stderr, "fm_adjust_focus: Invalid direction (must be 0=NEAR or 1=FAR)\n");
+        return -2;
+    }
+
+    // Validate steps (must be positive)
+    if (steps <= 0) {
+        fprintf(stderr, "fm_adjust_focus: Invalid steps (must be positive)\n");
+        return -3;
+    }
+
+    const char* dir_name = (direction == 0) ? "NEAR" : "FAR";
+
+    // Get current focus mode for logging
+    long current_focus_mode = 0;
+    long focus_mode_result = XSDK_GetProp(g_hCamera, API_CODE_GetFocusMode, 1, &current_focus_mode);
+    if (focus_mode_result == 0) {
+        const char* mode_name = "UNKNOWN";
+        if (current_focus_mode == SDK_FOCUS_MANUAL) mode_name = "MANUAL (MF)";
+        else if (current_focus_mode == SDK_FOCUS_AFS) mode_name = "AF-S";
+        else if (current_focus_mode == SDK_FOCUS_AFC) mode_name = "AF-C";
+
+        if (verbose_logging) {
+            printf("Current focus mode: %s (0x%04lX)\n", mode_name, current_focus_mode);
+            printf("Adjusting focus %s by %d steps...\n", dir_name, steps);
+        } else {
+            fprintf(stderr, "fm_adjust_focus: Focus mode is %s - adjusting %s by %d steps\n",
+                    mode_name, dir_name, steps);
+        }
+    }
+
+    // Query focus position capabilities
+    SDK_FOCUS_POS_CAP focus_cap;
+    memset(&focus_cap, 0, sizeof(focus_cap));
+    focus_cap.lSizeFocusPosCap = sizeof(SDK_FOCUS_POS_CAP);
+    focus_cap.lStructVer = 0x00010000;
+
+    long cap_size = sizeof(SDK_FOCUS_POS_CAP);
+    long cap_result = XSDK_CapProp(g_hCamera, API_CODE_CapFocusPos, 1, &cap_size, &focus_cap);
+
+    if (cap_result != 0) {
+        fprintf(stderr, "fm_adjust_focus: CapFocusPos failed with code %ld\n", cap_result);
+        fprintf(stderr, "  Lens may not support manual focus position control\n");
+        return -4;
+    }
+
+    // Check if lens supports focus position control
+    if (focus_cap.lFocusPlsFCSDepthCap == 0 || focus_cap.lMinDriveStepMFDriveEndThresh == 0) {
+        fprintf(stderr, "fm_adjust_focus: Lens does not support focus position control\n");
+        fprintf(stderr, "  lFocusPlsFCSDepthCap=%ld, lMinDriveStepMFDriveEndThresh=%ld\n",
+                focus_cap.lFocusPlsFCSDepthCap, focus_cap.lMinDriveStepMFDriveEndThresh);
+        return -5;
+    }
+
+    if (verbose_logging) {
+        printf("Focus range: MOD=%ld, INF=%ld (MinStep=%ld)\n",
+               focus_cap.lFocusPlsMOD, focus_cap.lFocusPlsINF, focus_cap.lMinDriveStepMFDriveEndThresh);
+    }
+
+    // Get current focus position
+    long current_pos = 0;
+    long get_result = XSDK_GetProp(g_hCamera, API_CODE_GetFocusPos, 1, &current_pos);
+
+    if (get_result != 0) {
+        fprintf(stderr, "fm_adjust_focus: GetFocusPos failed with code %ld\n", get_result);
+        return -6;
+    }
+
+    if (verbose_logging) {
+        printf("Current position: %ld\n", current_pos);
+    }
+
+    // Calculate new position
+    // For X-T3: smaller values = FAR (infinity), larger values = NEAR (close)
+    // direction=0 (NEAR) means move toward MOD (increase position)
+    // direction=1 (FAR) means move toward INF (decrease position)
+    long new_pos;
+    if (direction == 0) { // NEAR
+        new_pos = current_pos + steps;
+        // Clamp to MOD limit
+        if (new_pos > focus_cap.lFocusPlsMOD) {
+            new_pos = focus_cap.lFocusPlsMOD;
+            fprintf(stderr, "fm_adjust_focus: Clamped to MOD limit (%ld)\n", new_pos);
+        }
+    } else { // FAR
+        new_pos = current_pos - steps;
+        // Clamp to INF limit
+        if (new_pos < focus_cap.lFocusPlsINF) {
+            new_pos = focus_cap.lFocusPlsINF;
+            fprintf(stderr, "fm_adjust_focus: Clamped to INF limit (%ld)\n", new_pos);
+        }
+    }
+
+    if (verbose_logging) {
+        printf("Setting new position: %ld (delta: %+ld)\n", new_pos, new_pos - current_pos);
+    }
+
+    // Set new focus position
+    long set_result = XSDK_SetProp(g_hCamera, API_CODE_SetFocusPos, 1, new_pos);
+
+    if (set_result != 0) {
+        fprintf(stderr, "fm_adjust_focus: SetFocusPos failed with code %ld\n", set_result);
+        fprintf(stderr, "  Attempted position: %ld\n", new_pos);
+        fprintf(stderr, "  Valid range: %ld (INF) to %ld (MOD)\n",
+                focus_cap.lFocusPlsINF, focus_cap.lFocusPlsMOD);
+        return -7;
+    }
+
+    if (verbose_logging) {
+        printf("Focus position adjusted successfully to %ld\n", new_pos);
+    }
+
+    return 0;
+}
+
+// Trigger autofocus operation (single-shot AF)
+// Returns: 0 on success, negative on error
+int fm_trigger_autofocus() {
+    if (g_hCamera == NULL) {
+        fprintf(stderr, "fm_trigger_autofocus: Camera not connected\n");
+        return -1;
+    }
+
+    if (verbose_logging) {
+        printf("Triggering autofocus operation...\n");
+    }
+
+    // Trigger autofocus using XSDK_SetProp
+    // API: XSDK_SetProp(hCamera, API_CODE_SetFocusOperation, API_PARAM, lSetting, lDirection, lSpeed)
+    // For autofocus trigger: Use minimal valid values (direction=NEAR, speed=1)
+    long result = XSDK_SetProp(
+        g_hCamera,
+        API_CODE_SetFocusOperation,
+        3,  // API_PARAM_SetFocusOperation = 3
+        SDK_FOCUS_OPERATION_START,
+        SDK_FOCUS_DIRECTION_NEAR,  // Use NEAR (0x0000) as default
+        1   // Use minimal speed
+    );
+
+    if (result != 0) {
+        fprintf(stderr, "fm_trigger_autofocus: XSDK_SetProp failed with code %ld\n", result);
+        return -2;
+    }
+
+    if (verbose_logging) {
+        printf("Autofocus triggered successfully\n");
+    }
+
     return 0;
 }
 

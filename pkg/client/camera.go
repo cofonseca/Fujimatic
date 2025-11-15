@@ -203,6 +203,20 @@ func (c *RemoteCamera) GetSupportedShutterSpeeds() ([]int, error) {
 	return []int{}, nil
 }
 
+// AdjustFocus makes a manual focus adjustment using relative position steps
+// This is a no-op for remote cameras - focus adjustment is not supported via remote API
+func (c *RemoteCamera) AdjustFocus(direction string, steps int) error {
+	// Focus adjustment requires real-time feedback and is not practical for remote operation
+	// User should use the live view interface on the server for focus control
+	return fmt.Errorf("focus adjustment not available for remote cameras - use server live view interface")
+}
+
+// TriggerAutoFocus triggers autofocus on the server
+func (c *RemoteCamera) TriggerAutoFocus() error {
+	var resp api.FocusTriggerResponse
+	return c.post("/api/focus/trigger", nil, &resp)
+}
+
 // Capture triggers a capture on the server
 func (c *RemoteCamera) Capture() error {
 	var resp api.CaptureSingleResponse
