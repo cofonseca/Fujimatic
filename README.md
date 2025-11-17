@@ -9,6 +9,7 @@
 - Session state storage
 - Intervalometer with delay feature
 - Ability to view camera status, including battery level
+- **RAF to FITS/TIFF conversion** for astrophotography workflows (NINA, PixInsight, Siril)
 - Fake HAL implementation for unit tests (integration tests run manually against real hardware)
 - Cross-platform: Windows and Linux (incl. Raspberry Pi) support
 - Client/Server model for remote control
@@ -260,6 +261,29 @@ Total: ~20 seconds (captures/downloads overlap during delays)
     - Non-interactive: `--focus-mode manual|auto`
     - Default: Manual mode (prevents unwanted autofocus during long capture sessions)
     - Soft error handling for manual-only lenses
+- **RAF to FITS/TIFF Conversion**: Automatic conversion for astrophotography software
+  - **Supported formats**: FITS (Flexible Image Transport System) and TIFF (with Deflate compression)
+  - **Use case**: NINA, PixInsight, Siril, DS9 don't support Fujifilm RAF files natively
+  - **Quality**: 16-bit RGB color, preserves full dynamic range from sensor
+  - **Metadata**: Includes EXPTIME, ISO, DATE-OBS, camera model in FITS headers
+  - **Performance**: Background conversion (doesn't block captures), FITS ~3.5s, TIFF ~12s
+  - **Disk space**: TIFF saves 23% space vs FITS (compressed), both larger than RAF
+  - **Interactive mode**:
+    ```bash
+    session start nebula ./captures
+    set convert tiff              # Enable TIFF conversion
+    set delete-raf true           # Delete RAF after successful conversion
+    capture 100 10                # Captures will auto-convert in background
+    ```
+  - **Non-interactive mode**:
+    ```bash
+    ./bin/fujimatic.exe --frames 100 --delay 10 --convert-format tiff --delete-raf
+    ```
+  - **REST API**:
+    ```bash
+    GET /api/settings/conversion      # Get current settings
+    POST /api/settings/conversion     # Set format and delete-raf flag
+    ```
 - **Session management**: Save/load capture sessions with state persistence
 - **Battery monitoring**: Auto-pause at configurable threshold (default 10%)
 - **Pause/Resume**: Interrupt and continue intervalometer sessions

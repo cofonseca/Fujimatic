@@ -66,6 +66,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/settings/iso", s.handleSettingsISO)
 	mux.HandleFunc("/api/settings/shutter", s.handleSettingsShutter)
 	mux.HandleFunc("/api/settings/focus", s.handleSettingsFocus)
+	mux.HandleFunc("/api/settings/conversion", s.handleSettingsConversion)
 
 	// Focus Operations
 	mux.HandleFunc("/api/focus/trigger", s.handleFocusTrigger)
@@ -75,6 +76,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/session", s.handleSession)
 	mux.HandleFunc("/api/session/start", s.handleSessionStart)
 	mux.HandleFunc("/api/session/stop", s.handleSessionStop)
+	mux.HandleFunc("/api/session/browse", s.handleSessionBrowseDirectory)
 
 	// Capture
 	mux.HandleFunc("/api/capture/single", s.handleCaptureSingle)
@@ -83,6 +85,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/capture/resume", s.handleCaptureResume)
 	mux.HandleFunc("/api/capture/stop", s.handleCaptureStop)
 	mux.HandleFunc("/api/capture/status", s.handleCaptureStatus)
+	mux.HandleFunc("/api/capture/latest/preview", s.handleCaptureLatestPreview)
 
 	// Live View (placeholder for E-3)
 	mux.HandleFunc("/api/liveview/start", s.handleLiveViewStart)

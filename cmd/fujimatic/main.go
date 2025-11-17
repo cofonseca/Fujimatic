@@ -68,12 +68,16 @@ func main() {
 	delay := flag.Int("delay", 0, "Delay between frames in seconds (optional, defaults to 0)")
 	output := flag.String("output", "", "Output directory for captures (optional, defaults to current directory)")
 
+	// RAF conversion flags
+	convertFormat := flag.String("convert-format", "none", "Convert RAF files to format: none, fits, or tiff (e.g., --convert-format tiff)")
+	deleteRAF := flag.Bool("delete-raf", false, "Delete RAF files after successful conversion")
+
 	flag.Parse()
 
 	// Check if non-interactive mode is requested
 	if *frames > 0 || *iso > 0 || *shutter != "" || *focusMode != "" {
 		// Non-interactive mode
-		if err := runNonInteractive(fakeCamera, verbose, iso, shutter, focusMode, frames, delay, output); err != nil {
+		if err := runNonInteractive(fakeCamera, verbose, iso, shutter, focusMode, frames, delay, output, convertFormat, deleteRAF); err != nil {
 			fmt.Printf("Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -235,8 +239,8 @@ func (s *Shell) cmdHelp() error {
 	fmt.Println("  disconnect           - Disconnect from camera")
 	fmt.Println("  status               - Show camera and session status")
 	fmt.Println("  battery              - Show battery level")
-	fmt.Println("  get <iso|shutter|focus>    - Get current camera setting")
-	fmt.Println("  set <iso|shutter|focus> <value> - Set camera setting")
+	fmt.Println("  get <iso|shutter|focus|convert>    - Get current camera or conversion setting")
+	fmt.Println("  set <iso|shutter|focus|convert|delete-raf> <value> - Set camera or conversion setting")
 	fmt.Println("                         Shutter speeds (photographer-friendly):")
 	fmt.Println("                         - Fractions: 1/30, 1/125, 1/250, 1/500, 1/1000, 1/2000, 1/4000")
 	fmt.Println("                         - Decimals: 0.5, 1, 2, 4, 30 (in seconds)")
@@ -246,6 +250,9 @@ func (s *Shell) cmdHelp() error {
 	fmt.Println("                         Focus mode:")
 	fmt.Println("                         - manual: Manual focus (locked, no AF)")
 	fmt.Println("                         - auto: Single-shot autofocus before each capture")
+	fmt.Println("                         Conversion (requires active session):")
+	fmt.Println("                         - set convert <none|fits|tiff>: Enable RAF conversion")
+	fmt.Println("                         - set delete-raf <true|false>: Delete RAF after conversion")
 	fmt.Println("  shutters              - List available shutter speeds (diagnostic)")
 	fmt.Println("                         (Camera set to Manual exposure mode automatically)")
 	fmt.Println()
@@ -1228,8 +1235,15 @@ func (s *Shell) cmdGet(args []string) error {
 		}
 		fmt.Printf("Current focus mode: %s\n", modeName)
 
+	case "convert":
+		if s.session == nil {
+			return fmt.Errorf("conversion settings require an active session")
+		}
+		fmt.Printf("Conversion format: %s\n", s.session.ConvertFormat)
+		fmt.Printf("Delete RAF after conversion: %v\n", s.session.DeleteRAFAfter)
+
 	default:
-		return fmt.Errorf("unknown parameter: %s (use 'iso', 'shutter', or 'focus')", param)
+		return fmt.Errorf("unknown parameter: %s (use 'iso', 'shutter', 'focus', or 'convert')", param)
 	}
 
 	return nil
@@ -1372,8 +1386,49 @@ func (s *Shell) cmdSet(args []string) error {
 		}
 		fmt.Printf("Focus mode set to: %s\n", modeName)
 
+	case "convert":
+		// Set RAF conversion format
+		// Validate format
+		format := strings.ToLower(value)
+		if format != "none" && format != "fits" && format != "tiff" {
+			return fmt.Errorf("invalid conversion format: %s (use 'none', 'fits', or 'tiff')", value)
+		}
+
+		// Require active session for conversion settings
+		if s.session == nil {
+			return fmt.Errorf("conversion requires an active session - use 'session start' first")
+		}
+
+		s.session.ConvertFormat = format
+		fmt.Printf("RAF conversion format set to: %s\n", format)
+
+		if format != "none" {
+			fmt.Printf("Delete RAF after conversion: %v\n", s.session.DeleteRAFAfter)
+			fmt.Println("Use 'set delete-raf <true|false>' to change RAF deletion behavior")
+		}
+
+	case "delete-raf":
+		// Set RAF deletion flag
+		deleteRAF := strings.ToLower(value)
+		if deleteRAF != "true" && deleteRAF != "false" {
+			return fmt.Errorf("invalid value: %s (use 'true' or 'false')", value)
+		}
+
+		// Require active session
+		if s.session == nil {
+			return fmt.Errorf("delete-raf requires an active session - use 'session start' first")
+		}
+
+		s.session.DeleteRAFAfter = (deleteRAF == "true")
+		fmt.Printf("Delete RAF after conversion: %v\n", s.session.DeleteRAFAfter)
+
+		if s.session.DeleteRAFAfter && s.session.ConvertFormat == "none" {
+			fmt.Println("⚠️  Warning: RAF deletion enabled but conversion is disabled")
+			fmt.Println("   Use 'set convert <fits|tiff>' to enable conversion")
+		}
+
 	default:
-		return fmt.Errorf("unknown parameter: %s (use 'iso', 'shutter', or 'focus')", param)
+		return fmt.Errorf("unknown parameter: %s (use 'iso', 'shutter', 'focus', 'convert', or 'delete-raf')", param)
 	}
 
 	return nil
@@ -1598,7 +1653,7 @@ func formatDuration(d time.Duration) string {
 }
 
 // runNonInteractive executes the non-interactive mode with the specified parameters
-func runNonInteractive(fakeCamera *bool, verbose *bool, iso *int, shutter *string, focusMode *string, frames *int, delay *int, output *string) error {
+func runNonInteractive(fakeCamera *bool, verbose *bool, iso *int, shutter *string, focusMode *string, frames *int, delay *int, output *string, convertFormat *string, deleteRAF *bool) error {
 	var camera hal.Camera
 
 	if *fakeCamera {
@@ -1778,6 +1833,13 @@ func runNonInteractive(fakeCamera *bool, verbose *bool, iso *int, shutter *strin
 		session, err := session.New(projectName, outputDir, camera)
 		if err != nil {
 			return fmt.Errorf("failed to create session: %w", err)
+		}
+
+		// Apply conversion settings if provided
+		if *convertFormat != "none" {
+			session.ConvertFormat = strings.ToLower(*convertFormat)
+			session.DeleteRAFAfter = *deleteRAF
+			fmt.Printf("RAF conversion enabled: %s (delete RAF after: %v)\n", session.ConvertFormat, session.DeleteRAFAfter)
 		}
 
 		fmt.Printf("Starting capture: %d frames", *frames)

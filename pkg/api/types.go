@@ -101,6 +101,13 @@ type SessionStopResponse struct {
 	StatusCode int    `json:"status_code"`
 }
 
+type BrowseDirectoryResponse struct {
+	Selected   bool   `json:"selected"`    // true if user selected a directory, false if cancelled
+	Path       string `json:"path"`        // Selected directory path (empty if cancelled)
+	Status     string `json:"status"`      // "ok" or "cancelled"
+	StatusCode int    `json:"status_code"` // HTTP status code
+}
+
 // Capture
 
 type CaptureSingleResponse struct {
@@ -180,6 +187,27 @@ type FocusAdjustResponse struct {
 	Direction  string `json:"direction"`
 	Steps      int    `json:"steps"`
 	StatusCode int    `json:"status_code"`
+}
+
+// Conversion Settings
+
+type ConversionGetResponse struct {
+	ConvertFormat  string `json:"convert_format"`  // "none", "fits", or "tiff"
+	DeleteRAFAfter bool   `json:"delete_raf_after"` // Delete RAF files after conversion
+	Status         string `json:"status"`
+	StatusCode     int    `json:"status_code"`
+}
+
+type ConversionSetRequest struct {
+	ConvertFormat  string `json:"convert_format"`   // "none", "fits", or "tiff"
+	DeleteRAFAfter bool   `json:"delete_raf_after"` // Delete RAF files after conversion
+}
+
+type ConversionSetResponse struct {
+	ConvertFormat  string `json:"convert_format"`
+	DeleteRAFAfter bool   `json:"delete_raf_after"`
+	Status         string `json:"status"`
+	StatusCode     int    `json:"status_code"`
 }
 
 // Error Response

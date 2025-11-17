@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/cfonseca/fujimatic/pkg/converter"
 	"github.com/cfonseca/fujimatic/pkg/logger"
 	"github.com/cfonseca/fujimatic/pkg/session"
 )
@@ -443,6 +446,56 @@ func (s *Server) handleSettingsFocus(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Conversion Settings Handler
+
+func (s *Server) handleSettingsConversion(w http.ResponseWriter, r *http.Request) {
+	sess := s.state.GetSession()
+
+	// Conversion settings require an active session
+	if sess == nil {
+		s.sendError(w, http.StatusBadRequest, "Conversion settings require an active session - start a session first")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		s.sendJSON(w, http.StatusOK, ConversionGetResponse{
+			ConvertFormat:  sess.ConvertFormat,
+			DeleteRAFAfter: sess.DeleteRAFAfter,
+			Status:         "ok",
+			StatusCode:     200,
+		})
+
+	case http.MethodPost:
+		var req ConversionSetRequest
+		if err := s.parseJSON(r, &req); err != nil {
+			s.sendError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err))
+			return
+		}
+
+		// Validate format
+		format := req.ConvertFormat
+		if format != "none" && format != "fits" && format != "tiff" {
+			s.sendError(w, http.StatusBadRequest, fmt.Sprintf("Invalid conversion format: %s (must be 'none', 'fits', or 'tiff')", format))
+			return
+		}
+
+		// Update session settings
+		sess.ConvertFormat = format
+		sess.DeleteRAFAfter = req.DeleteRAFAfter
+
+		s.sendJSON(w, http.StatusOK, ConversionSetResponse{
+			ConvertFormat:  sess.ConvertFormat,
+			DeleteRAFAfter: sess.DeleteRAFAfter,
+			Status:         "ok",
+			StatusCode:     200,
+		})
+
+	default:
+		s.sendError(w, http.StatusMethodNotAllowed, "Method not allowed")
+	}
+}
+
 // Focus Operations Handlers
 
 // handleFocusTrigger triggers a single-shot autofocus operation
@@ -570,9 +623,12 @@ func (s *Server) handleSessionStart(w http.ResponseWriter, r *http.Request) {
 
 	var req SessionStartRequest
 	if err := s.parseJSON(r, &req); err != nil {
+		logger.Error("Session start - failed to parse JSON: %v", err)
 		s.sendError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err))
 		return
 	}
+
+	logger.Info("Session start request: project=%s, output_dir=%s", req.Project, req.OutputDir)
 
 	// Expand tilde in output directory
 	outputDir := req.OutputDir
@@ -585,9 +641,13 @@ func (s *Server) handleSessionStart(w http.ResponseWriter, r *http.Request) {
 	camera := s.state.GetCamera()
 	sess, err := session.New(req.Project, outputDir, camera)
 	if err != nil {
+		logger.Error("Session start - failed to create session: %v", err)
 		s.sendError(w, http.StatusBadRequest, fmt.Sprintf("Failed to create session: %v", err))
 		return
 	}
+
+	logger.Info("Session created successfully: project=%s, output_dir=%s, sequence=%d",
+		sess.ProjectName, sess.OutputDir, sess.SequenceNumber)
 
 	s.state.SetSession(sess)
 
@@ -608,6 +668,54 @@ func (s *Server) handleSessionStop(w http.ResponseWriter, r *http.Request) {
 
 	s.sendJSON(w, http.StatusOK, SessionStopResponse{
 		Status:     "stopped",
+		StatusCode: 200,
+	})
+}
+
+// handleSessionBrowseDirectory shows a native folder picker dialog on the server
+func (s *Server) handleSessionBrowseDirectory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.sendError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	// Use PowerShell to show Windows folder browser dialog
+	// This runs on the server side, so it shows the server's file system
+	psScript := `Add-Type -AssemblyName System.Windows.Forms
+$folderBrowser = New-Object System.Windows.Forms.FolderBrowserDialog
+$folderBrowser.Description = "Select capture directory"
+$folderBrowser.RootFolder = [System.Environment+SpecialFolder]::MyComputer
+$folderBrowser.ShowNewFolderButton = $true
+$result = $folderBrowser.ShowDialog()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+    Write-Output $folderBrowser.SelectedPath
+} else {
+    exit 1
+}`
+
+	// NOTE: Must NOT use -NonInteractive flag as it prevents GUI dialogs
+	cmd := exec.Command("powershell", "-NoProfile", "-Command", psScript)
+	output, err := cmd.Output()
+
+	logger.Info("Browse directory result: err=%v, output=%s", err, string(output))
+
+	if err != nil {
+		// User cancelled or error occurred
+		s.sendJSON(w, http.StatusOK, BrowseDirectoryResponse{
+			Selected:   false,
+			Path:       "",
+			Status:     "cancelled",
+			StatusCode: 200,
+		})
+		return
+	}
+
+	selectedPath := strings.TrimSpace(string(output))
+
+	s.sendJSON(w, http.StatusOK, BrowseDirectoryResponse{
+		Selected:   true,
+		Path:       selectedPath,
+		Status:     "ok",
 		StatusCode: 200,
 	})
 }
@@ -649,6 +757,7 @@ func (s *Server) handleCaptureSingle(w http.ResponseWriter, r *http.Request) {
 
 	if sess != nil {
 		// Session exists - use session-based capture
+		logger.Info("Capture: using active session (project=%s, output_dir=%s)", sess.ProjectName, sess.OutputDir)
 		filename = sess.GetNextFilename()
 
 		// Capture and download
@@ -658,8 +767,10 @@ func (s *Server) handleCaptureSingle(w http.ResponseWriter, r *http.Request) {
 		}
 
 		filePath = filepath.Join(sess.OutputDir, filename)
+		logger.Info("Capture: saved to %s", filePath)
 	} else {
 		// No session - do standalone capture
+		logger.Info("Capture: no active session, using default directory ./captures")
 		outputDir = "./captures"
 
 		// Get next available filename
@@ -712,8 +823,102 @@ func (s *Server) handleCaptureSingle(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCaptureStart(w http.ResponseWriter, r *http.Request) {
-	// Placeholder - full intervalometer integration needed
-	s.sendError(w, http.StatusNotImplemented, "Intervalometer not yet implemented in server mode")
+	if r.Method != http.MethodPost {
+		s.sendError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req CaptureStartRequest
+	if err := s.parseJSON(r, &req); err != nil {
+		s.sendError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err))
+		return
+	}
+
+	sess := s.state.GetSession()
+	if sess == nil {
+		s.sendError(w, http.StatusBadRequest, "No active session - set a capture directory first")
+		return
+	}
+
+	camera := s.state.GetCamera()
+	if !camera.IsConnected() {
+		s.sendError(w, http.StatusServiceUnavailable, "Camera not connected")
+		return
+	}
+
+	// Stop live view if active (required for intervalometer)
+	active, err := camera.IsLiveViewActive()
+	if err == nil && active {
+		logger.Info("Auto-stopping live view before intervalometer...")
+		if err := camera.StopLiveView(); err != nil {
+			logger.Error("Failed to stop live view: %v", err)
+			s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to stop live view: %v", err))
+			return
+		}
+		logger.Info("Live view stopped successfully")
+
+		// Give camera time to settle after stopping live view
+		// The X-T3 needs time to release hardware before capture can start
+		time.Sleep(2 * time.Second)
+	}
+
+	logger.Info("Starting intervalometer: count=%d, delay=%d, async=%v", req.Count, req.Delay, req.Async)
+
+	// Set interval tracking fields on the session
+	sess.IntervalActive = true
+	sess.IntervalTotalFrames = req.Count
+	sess.IntervalCurrentFrame = 0
+	sess.IntervalDelay = time.Duration(req.Delay) * time.Second
+	sess.IntervalStartTime = time.Now()
+	sess.IntervalAsyncMode = req.Async
+
+	// Start the intervalometer in a background goroutine
+	go func() {
+		// Ensure we clear the active flag when done
+		defer func() {
+			sess.IntervalActive = false
+			logger.Info("Intervalometer stopped (active flag cleared)")
+		}()
+
+		// Give camera a moment to settle before first capture
+		// The SDK needs time after the HTTP response is sent
+		// Increased from 1s to 2s to reduce "camera not ready" errors
+		time.Sleep(2 * time.Second)
+		logger.Info("Intervalometer starting captures...")
+
+		successCount := 0
+		for i := 0; i < req.Count; i++ {
+			// Check if user requested stop
+			if !sess.IntervalActive {
+				logger.Info("Intervalometer stopped by user at frame %d/%d", i+1, req.Count)
+				break
+			}
+
+			// Update current frame counter (1-indexed for user display)
+			sess.IntervalCurrentFrame = i + 1
+
+			// Capture using the session
+			if err := sess.Capture(); err != nil {
+				logger.Error("Intervalometer capture %d/%d failed: %v", i+1, req.Count, err)
+				// Continue with next frame despite error
+			} else {
+				successCount++
+				logger.Info("Intervalometer: captured frame %d/%d (success: %d)", i+1, req.Count, successCount)
+			}
+
+			// Apply delay (except after last frame)
+			if i < req.Count-1 && req.Delay > 0 {
+				time.Sleep(time.Duration(req.Delay) * time.Second)
+			}
+		}
+		logger.Info("Intervalometer complete: %d/%d frames captured successfully", successCount, req.Count)
+	}()
+
+	s.sendJSON(w, http.StatusOK, CaptureStartResponse{
+		Status:      "started",
+		StatusCode:  200,
+		TotalFrames: req.Count,
+	})
 }
 
 func (s *Server) handleCapturePause(w http.ResponseWriter, r *http.Request) {
@@ -727,8 +932,31 @@ func (s *Server) handleCaptureResume(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCaptureStop(w http.ResponseWriter, r *http.Request) {
-	// Placeholder - full intervalometer integration needed
-	s.sendError(w, http.StatusNotImplemented, "Intervalometer not yet implemented in server mode")
+	if r.Method != http.MethodPost {
+		s.sendError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	sess := s.state.GetSession()
+	if sess == nil {
+		s.sendError(w, http.StatusBadRequest, "No active session")
+		return
+	}
+
+	// Clear interval active flag (the goroutine will finish its current capture then exit)
+	if sess.IntervalActive {
+		sess.IntervalActive = false
+		logger.Info("Intervalometer stop requested - setting active flag to false")
+		s.sendJSON(w, http.StatusOK, CaptureStopResponse{
+			Status:     "stopped",
+			StatusCode: 200,
+		})
+	} else {
+		s.sendJSON(w, http.StatusOK, CaptureStopResponse{
+			Status:     "not_running",
+			StatusCode: 200,
+		})
+	}
 }
 
 func (s *Server) handleCaptureStatus(w http.ResponseWriter, r *http.Request) {
@@ -737,10 +965,90 @@ func (s *Server) handleCaptureStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Placeholder - return inactive for now
+	// Get session from state
+	sess := s.state.GetSession()
+	if sess == nil {
+		// No session - return inactive
+		s.sendJSON(w, http.StatusOK, CaptureStatusResponse{
+			Active: false,
+		})
+		return
+	}
+
+	// Check if intervalometer is running
+	if !sess.IntervalActive {
+		s.sendJSON(w, http.StatusOK, CaptureStatusResponse{
+			Active: false,
+		})
+		return
+	}
+
+	// Calculate elapsed time and ETA
+	elapsed := int(time.Since(sess.IntervalStartTime).Seconds())
+	eta := 0
+	if sess.IntervalTotalFrames > 0 && sess.IntervalCurrentFrame > 0 {
+		// Estimate ETA based on progress so far
+		averageTimePerFrame := float64(elapsed) / float64(sess.IntervalCurrentFrame)
+		framesRemaining := sess.IntervalTotalFrames - sess.IntervalCurrentFrame
+		eta = int(averageTimePerFrame * float64(framesRemaining))
+	}
+
+	// Return active status with progress
 	s.sendJSON(w, http.StatusOK, CaptureStatusResponse{
-		Active: false,
+		Active:  true,
+		Frame:   sess.IntervalCurrentFrame,
+		Total:   sess.IntervalTotalFrames,
+		Elapsed: elapsed,
+		ETA:     eta,
 	})
+}
+
+func (s *Server) handleCaptureLatestPreview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		s.sendError(w, http.StatusMethodNotAllowed, "GET or HEAD required")
+		return
+	}
+
+	// Get session from state
+	sess := s.state.GetSession()
+	if sess == nil {
+		s.sendError(w, http.StatusNotFound, "No active session")
+		return
+	}
+
+	// Check if we have a latest capture
+	if sess.LatestCapturePath == "" {
+		s.sendError(w, http.StatusNotFound, "No captures available yet")
+		return
+	}
+
+	// Check if the file exists
+	if _, err := os.Stat(sess.LatestCapturePath); os.IsNotExist(err) {
+		s.sendError(w, http.StatusNotFound, fmt.Sprintf("Capture file not found: %s", sess.LatestCapturePath))
+		return
+	}
+
+	// For HEAD requests, just return headers without body
+	if r.Method == http.MethodHead {
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Extract JPEG thumbnail from RAF file using LibRaw
+	thumbData, err := converter.ExtractThumbnail(sess.LatestCapturePath)
+	if err != nil {
+		s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to extract thumbnail: %v", err))
+		return
+	}
+
+	// Serve the JPEG thumbnail
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(thumbData)))
+	w.WriteHeader(http.StatusOK)
+	w.Write(thumbData)
 }
 
 // Live View Handlers (E-3)
@@ -760,6 +1068,13 @@ func (s *Server) handleLiveViewStart(w http.ResponseWriter, r *http.Request) {
 	// Check if camera is connected
 	if !camera.IsConnected() {
 		s.sendError(w, http.StatusBadRequest, "Camera not connected")
+		return
+	}
+
+	// Check if intervalometer is running - camera can't do both simultaneously
+	sess := s.state.GetSession()
+	if sess != nil && sess.IntervalActive {
+		s.sendError(w, http.StatusConflict, "Cannot start live view while intervalometer is running. Camera can only perform one operation at a time.")
 		return
 	}
 

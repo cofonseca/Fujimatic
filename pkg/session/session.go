@@ -3,10 +3,13 @@ package session
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/cfonseca/fujimatic/pkg/converter"
 	"github.com/cfonseca/fujimatic/pkg/hal"
 )
 
@@ -27,6 +30,13 @@ type Session struct {
 	IntervalStartTime   time.Time     `json:"interval_start_time"`
 	LastShutterSpeed    int           `json:"last_shutter_speed"`    // In microseconds, for integration time calculation
 	IntervalAsyncMode   bool          `json:"interval_async_mode"`   // Track if using async pipeline
+
+	// RAF Conversion settings
+	ConvertFormat  string `json:"convert_format"`   // "none", "fits", or "tiff"
+	DeleteRAFAfter bool   `json:"delete_raf_after"` // Delete RAF after successful conversion
+
+	// Latest capture tracking (for preview display)
+	LatestCapturePath string `json:"latest_capture_path"` // Full path to most recently captured file
 
 	// Async pipeline state (not persisted to JSON)
 	captureQueue chan int // Buffered channel for sequence numbers waiting to be downloaded
@@ -52,6 +62,8 @@ func New(projectName, outputDir string, camera hal.Camera) (*Session, error) {
 		SequenceNumber: 1,
 		CreatedAt:      time.Now(),
 		camera:         camera,
+		ConvertFormat:  "none", // Disabled by default
+		DeleteRAFAfter: false,  // Keep RAF by default
 	}, nil
 }
 
@@ -94,6 +106,15 @@ func (s *Session) Capture() error {
 	// Download the captured image
 	if err := s.camera.DownloadLast(s.OutputDir, filename); err != nil {
 		return fmt.Errorf("download failed: %w", err)
+	}
+
+	// Track latest capture for preview
+	s.LatestCapturePath = filePath
+
+	// Convert in background if enabled
+	if s.ConvertFormat != "none" {
+		rafPath := filepath.Join(s.OutputDir, filename)
+		go s.convertAndCleanup(rafPath)
 	}
 
 	// Increment sequence for next capture
@@ -311,11 +332,66 @@ func (s *Session) DownloadCaptured(seqNum int) error {
 	}
 
 	filename := fmt.Sprintf("%s_%04d.RAF", s.ProjectName, seqNum)
+	filePath := filepath.Join(s.OutputDir, filename)
 
 	// Download the captured image
 	if err := s.camera.DownloadLast(s.OutputDir, filename); err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
 
+	// Track latest capture for preview
+	s.LatestCapturePath = filePath
+
+	// Convert in background if enabled
+	if s.ConvertFormat != "none" {
+		go s.convertAndCleanup(filePath)
+	}
+
 	return nil
+}
+
+// convertAndCleanup performs background conversion of RAF file to FITS/TIFF
+// Runs in a goroutine to avoid blocking the capture pipeline
+func (s *Session) convertAndCleanup(rafPath string) {
+	// Validate conversion format
+	format := strings.ToLower(s.ConvertFormat)
+	if format != "fits" && format != "tiff" {
+		log.Printf("WARNING: Invalid conversion format '%s', skipping conversion", s.ConvertFormat)
+		return
+	}
+
+	// Generate output path (same base name, different extension)
+	outputPath := strings.TrimSuffix(rafPath, ".RAF") + "." + format
+
+	// Create converter instance
+	conv := converter.NewRealConverter()
+	if err := conv.Init(); err != nil {
+		log.Printf("WARNING: Failed to initialize converter: %v (skipping conversion)", err)
+		return
+	}
+	defer conv.Close()
+
+	// Perform conversion based on format
+	var err error
+	if format == "fits" {
+		err = conv.ConvertRAFtoFITS(rafPath, outputPath)
+	} else { // format == "tiff"
+		err = conv.ConvertRAFtoTIFF(rafPath, outputPath)
+	}
+
+	if err != nil {
+		log.Printf("WARNING: Conversion failed for %s: %v (RAF file preserved)", rafPath, err)
+		return
+	}
+
+	log.Printf("Converted %s → %s", filepath.Base(rafPath), filepath.Base(outputPath))
+
+	// Delete RAF file if requested (only after successful conversion)
+	if s.DeleteRAFAfter {
+		if err := os.Remove(rafPath); err != nil {
+			log.Printf("WARNING: Failed to delete RAF file %s: %v", rafPath, err)
+		} else {
+			log.Printf("Deleted RAF file: %s", filepath.Base(rafPath))
+		}
+	}
 }

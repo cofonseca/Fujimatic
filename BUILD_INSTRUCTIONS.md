@@ -33,6 +33,19 @@ This document provides detailed instructions for building fujimatic on Windows w
                  └── FF*.dll (various SDK DLLs)
      ```
 
+4. **LibRaw (for RAF to FITS/TIFF conversion)**
+   - Required only if you want RAF conversion features
+   - Install via MSYS2:
+     ```bash
+     pacman -S mingw-w64-x86_64-libraw
+     ```
+   - Verify installation:
+     ```bash
+     ls /c/msys64/mingw64/include/libraw/
+     ls /c/msys64/mingw64/lib/libraw*
+     ```
+   - **Note**: If you don't need RAF conversion, you can skip this and build with `CGO_ENABLED=0` (conversion features will be disabled)
+
 ### Environment Setup
 
 **CRITICAL**: Before building, you MUST add MinGW to your PATH:
@@ -70,9 +83,9 @@ echo 'int main() { return 0; }' > test.c && gcc test.c -o test.exe && ./test.exe
 
 ## Build Process
 
-The build has two stages: C wrapper, then Go application.
+The build has three stages: Fujifilm SDK wrapper, LibRaw wrapper (optional), then Go application.
 
-### Stage 1: Build C Wrapper
+### Stage 1: Build Fujifilm SDK Wrapper
 
 The C wrapper (`fmwrapper.dll`) links against the Fujifilm SDK and provides a simplified C API.
 
@@ -110,7 +123,44 @@ gcc -shared \
 | `XAPI.H: No such file` | SDK headers missing | Check `sdk/HEADERS/` exists |
 | `cannot find -lXAPI` | SDK DLL missing | Check `sdk/REDISTRIBUTABLES/Windows/64bit/XAPI.dll` exists |
 
-### Stage 2: Build Go Application
+### Stage 2: Build LibRaw Wrapper (Optional)
+
+The LibRaw wrapper (`libraw_wrapper.dll`) enables RAF to FITS/TIFF conversion.
+
+**Skip this stage if you don't need conversion features** (build with `CGO_ENABLED=0` instead).
+
+**From Git Bash or MSYS2 terminal:**
+
+```bash
+# Ensure PATH is set
+export PATH="/c/msys64/mingw64/bin:$PATH"
+
+# Navigate to project root
+cd C:/Users/cfonseca/Documents/fujimatic
+
+# Build the LibRaw wrapper
+gcc -shared \
+    -o libs/windows/libraw_wrapper.dll \
+    sdk-c-wrapper/libraw_wrapper.c \
+    -I sdk-c-wrapper \
+    -I /c/msys64/mingw64/include \
+    -L /c/msys64/mingw64/lib \
+    -lraw \
+    -D_WIN32
+```
+
+**Expected output:**
+- `libs/windows/libraw_wrapper.dll` - The compiled LibRaw wrapper DLL (~237 KB)
+- No import library needed (only called from Go, not linked at compile time)
+
+**Common errors:**
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `libraw.h: No such file` | LibRaw not installed | Run `pacman -S mingw-w64-x86_64-libraw` |
+| `cannot find -lraw` | LibRaw library missing | Check `/c/msys64/mingw64/lib/libraw.a` exists |
+
+### Stage 3: Build Go Application
 
 The Go application links against the C wrapper using CGO.
 
@@ -126,18 +176,25 @@ cd C:/Users/cfonseca/Documents/fujimatic
 # Build the application
 go build -o bin/fujimatic.exe ./cmd/fujimatic
 
-# CRITICAL: Copy wrapper DLL to bin directory
+# CRITICAL: Copy wrapper DLLs to bin directory
 cp libs/windows/fmwrapper.dll bin/
+
+# If you built the LibRaw wrapper (conversion support):
+cp libs/windows/libraw_wrapper.dll bin/
+cp /c/msys64/mingw64/bin/libraw-23.dll bin/
 ```
 
-**Why the DLL copy is required:**
+**Why the DLL copies are required:**
 - Windows searches for DLLs in the same directory as the .exe FIRST
 - CGO's `-L` flag only affects build-time linking, not runtime loading
 - Without this copy, you'll get exit code 127 (DLL not found)
+- LibRaw wrapper needs both its own DLL and the LibRaw library DLL (`libraw-23.dll`)
 
 **Expected output:**
-- `bin/fujimatic.exe` - The compiled binary (approximately 5-6 MB)
-- `bin/fmwrapper.dll` - Copy of the C wrapper (required at runtime)
+- `bin/fujimatic.exe` - The compiled binary (approximately 17 MB with conversion support)
+- `bin/fmwrapper.dll` - Copy of the Fujifilm SDK wrapper (required at runtime)
+- `bin/libraw_wrapper.dll` - Copy of the LibRaw wrapper (if conversion enabled)
+- `bin/libraw-23.dll` - LibRaw library (if conversion enabled)
 
 **Verify the build:**
 ```bash

@@ -563,12 +563,739 @@ File: jupiter_video_0001.MOV
 
 ---
 
+### E-6. Browser-Based Interactive Zoom for Manual Focus 📋 Not Started
+**Status:** Not Started
+**Date:** 2025-11-15
+**Requirements:**
+- [ ] Implement Canvas-based zoom with pan capability (Option 2)
+- [ ] Implement Interactive click-to-zoom feature (Option 3)
+- [ ] Support both zoom modes concurrently (user can use either/both)
+- [ ] Pure client-side implementation (HTML/CSS/JavaScript)
+- [ ] No server-side changes required
+- [ ] Zoom controls in live view interface
+- [ ] Smooth user experience for astrophotography focusing
+
+**Use Case: Astrophotography Manual Focus**
+- Astrophotographers need to verify critical focus on dim stars
+- Current live view stream is full-frame only, making it hard to see if stars are sharp
+- Digital zoom allows focusing on specific regions to check focus accuracy
+- Essential for long-exposure deep-sky imaging where focus must be perfect
+
+**Implementation Option 2: Canvas-Based Zoom with Pan**
+- Capture MJPEG frames and render to HTML5 Canvas
+- Apply canvas scaling to zoom into specific regions
+- Click-and-drag to pan around the zoomed image
+- Zoom levels: 1x (normal), 2x, 4x, 6x (adjustable via slider or buttons)
+- Maintains full frame in background, shows zoomed crop in foreground
+
+**Implementation Option 3: Interactive Click-to-Zoom**
+- Click on any region of the live view to zoom on that specific point
+- Picture-in-picture style: small zoomed inset window appears
+- Automatically centers zoom on clicked coordinates
+- Multiple zoom windows possible (click different stars to compare)
+- Quick toggle to dismiss zoom windows and return to full frame
+
+**Technical Implementation (Client-Side Only):**
+
+**Files to Modify:**
+1. **`static/liveview.html`** - Add zoom UI controls and canvas elements
+2. **New: `static/js/liveview-zoom.js`** - JavaScript zoom logic
+
+**HTML Changes:**
+```html
+<!-- Zoom controls -->
+<div id="zoom-controls">
+  <button id="zoom-canvas">Canvas Zoom</button>
+  <button id="zoom-click">Click to Zoom</button>
+  <label>Zoom Level: <input type="range" id="zoom-level" min="1" max="6" value="2"></label>
+  <button id="zoom-reset">Reset</button>
+</div>
+
+<!-- Canvas for zoom mode -->
+<canvas id="zoom-canvas-display" style="display:none;"></canvas>
+
+<!-- Click-to-zoom inset windows -->
+<div id="zoom-insets"></div>
+```
+
+**JavaScript Zoom Logic (Option 2 - Canvas):**
+```javascript
+// Capture MJPEG frame to canvas
+const canvas = document.getElementById('zoom-canvas-display');
+const ctx = canvas.getContext('2d');
+const img = document.querySelector('#liveview-stream img');
+
+// Draw zoomed region
+function drawZoomedRegion(centerX, centerY, zoomLevel) {
+  const sourceWidth = img.naturalWidth / zoomLevel;
+  const sourceHeight = img.naturalHeight / zoomLevel;
+  const sourceX = centerX - sourceWidth / 2;
+  const sourceY = centerY - sourceHeight / 2;
+
+  ctx.drawImage(img, sourceX, sourceY, sourceWidth, sourceHeight,
+                0, 0, canvas.width, canvas.height);
+}
+
+// Pan support: click and drag to move zoom center
+let isDragging = false;
+let dragStartX, dragStartY;
+
+canvas.addEventListener('mousedown', (e) => {
+  isDragging = true;
+  dragStartX = e.clientX;
+  dragStartY = e.clientY;
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  if (isDragging) {
+    const deltaX = e.clientX - dragStartX;
+    const deltaY = e.clientY - dragStartY;
+    // Update center position and redraw
+    updateZoomCenter(deltaX, deltaY);
+  }
+});
+```
+
+**JavaScript Zoom Logic (Option 3 - Click-to-Zoom):**
+```javascript
+// Click handler on live view image
+const liveviewImg = document.querySelector('#liveview-stream img');
+
+liveviewImg.addEventListener('click', (e) => {
+  const rect = liveviewImg.getBoundingClientRect();
+  const clickX = e.clientX - rect.left;
+  const clickY = e.clientY - rect.top;
+
+  // Create zoom inset window
+  createZoomInset(clickX, clickY, zoomLevel);
+});
+
+function createZoomInset(centerX, centerY, zoomLevel) {
+  const inset = document.createElement('div');
+  inset.className = 'zoom-inset';
+  inset.style.position = 'absolute';
+  inset.style.border = '2px solid yellow';
+  inset.style.width = '200px';
+  inset.style.height = '200px';
+
+  const insetCanvas = document.createElement('canvas');
+  inset.appendChild(insetCanvas);
+
+  // Draw zoomed region to inset canvas
+  const ctx = insetCanvas.getContext('2d');
+  // ... similar to Option 2 canvas logic ...
+
+  document.getElementById('zoom-insets').appendChild(inset);
+
+  // Close button
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = 'X';
+  closeBtn.onclick = () => inset.remove();
+  inset.appendChild(closeBtn);
+}
+```
+
+**CSS Styling:**
+```css
+#zoom-controls {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 10px;
+  border-radius: 5px;
+}
+
+#zoom-canvas-display {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 10;
+  cursor: move;
+}
+
+.zoom-inset {
+  position: absolute;
+  background: rgba(0, 0, 0, 0.9);
+  padding: 5px;
+  border: 2px solid yellow;
+  z-index: 20;
+}
+```
+
+**User Workflow:**
+
+**Canvas Zoom Mode:**
+1. User opens live view in browser
+2. Clicks "Canvas Zoom" button
+3. Adjusts zoom level with slider (2x, 4x, 6x)
+4. Clicks and drags to pan around the frame
+5. Verifies focus on specific stars
+6. Clicks "Reset" to return to full frame
+
+**Click-to-Zoom Mode:**
+1. User opens live view in browser
+2. Clicks "Click to Zoom" to enable mode
+3. Clicks on a star in the live view
+4. Small zoomed inset window appears showing that region
+5. Can click multiple stars to compare focus across frame
+6. Clicks X on inset windows to close them
+
+**Performance Considerations:**
+- Canvas operations run entirely in browser (no server load)
+- MJPEG stream continues at normal frame rate
+- Zoom calculations use client GPU via canvas hardware acceleration
+- Minimal memory overhead (canvas buffers)
+- No impact on camera or SDK operations
+
+**Browser Compatibility:**
+- HTML5 Canvas supported in all modern browsers
+- Mouse events for click/drag work universally
+- CSS transforms provide smooth scaling
+- No special browser plugins required
+
+**Acceptance Criteria:**
+- [ ] Canvas zoom mode working (crop and scale frames)
+- [ ] Click-and-drag pan functionality working
+- [ ] Click-to-zoom mode working (inset windows)
+- [ ] Multiple zoom windows supported
+- [ ] Zoom level adjustable via slider
+- [ ] Reset button returns to full frame
+- [ ] UI controls intuitive and responsive
+- [ ] No server-side changes required
+- [ ] Works in modern browsers (Chrome, Firefox, Edge)
+- [ ] Tested with real camera live view stream
+- [ ] Focus verification workflow smooth and efficient
+
+**Testing Plan:**
+1. Test Canvas zoom mode: zoom in on bright star, verify sharpness
+2. Test pan functionality: drag to explore different regions
+3. Test click-to-zoom: click on multiple stars, compare focus
+4. Test zoom levels: verify 2x, 4x, 6x magnification working
+5. Test reset: ensure clean return to full frame
+6. Test performance: verify smooth operation with live MJPEG stream
+7. Test browser compatibility: Chrome, Firefox, Edge
+
+**Status:** 📋 **Ready for Implementation** - Pure client-side feature, no server changes needed
+
+---
+
+### E-7. Focus Peaking (MF Assist Mode) 📋 Not Started
+**Status:** Not Started
+**Date:** 2025-11-15
+**Requirements:**
+- [ ] Research SetMFAssistMode SDK function (4-2-15-DisplayControl_compressed.pdf)
+- [ ] Implement C wrapper function: fm_set_mf_assist_mode()
+- [ ] Implement Go SDK bindings
+- [ ] Implement HAL interface methods
+- [ ] Add dropdown UI control in live view interface
+- [ ] Support all MF assist modes (standard, split image, focus peaking colors)
+- [ ] Default mode: Standard (no peaking)
+- [ ] Test with real X-T3 camera
+
+**Use Case: Manual Focus Assistance**
+- Focus peaking highlights in-focus edges with colored overlay
+- Essential for astrophotography where autofocus doesn't work on dim stars
+- Split image modes provide traditional manual focus aids
+- Helps achieve critical focus faster and more accurately
+
+**SDK Function: SetMFAssistMode**
+- SDK Manual: `sdk/MANUAL/4-2-15-DisplayControl_compressed.pdf` (pages 3-5)
+- Property ID: `kFUJIFILM_PROP_DISP_MF_ASSIST_MODE`
+- Requires State S3 (camera connected)
+- Supported by X-T3 (confirmed in support matrix)
+
+**Available MF Assist Modes:**
+- **Standard** (0x0001): No assist, normal live view
+- **Split Image B&W** (0x0002): Traditional split prism focus aid (monochrome)
+- **Split Image Color** (0x0003): Split prism in color
+- **Focus Peak White** (0x0004): Highlight in-focus edges in white
+- **Focus Peak Red** (0x0005): Highlight in-focus edges in red
+- **Focus Peak Blue** (0x0006): Highlight in-focus edges in blue
+- **Focus Peak Yellow** (0x0008): Highlight in-focus edges in yellow
+- **Focus Peak White (Low)** (0x8004): White peaking, low intensity
+- **Focus Peak Red (Low)** (0x8005): Red peaking, low intensity
+- **Focus Peak Blue (Low)** (0x8006): Blue peaking, low intensity
+- **Focus Peak Yellow (Low)** (0x8008): Yellow peaking, low intensity
+- **Digital Microprism** (0x0010): Microprism focusing screen simulation
+
+**Implementation Notes:**
+
+**NOTE: This is a FULL STACK feature requiring changes across all layers**
+- C wrapper layer (sdk-c-wrapper/)
+- Go SDK layer (pkg/sdk/)
+- HAL interface (pkg/hal/)
+- API types and handlers (pkg/api/)
+- Client-side UI (static/liveview.html)
+
+**C Wrapper (sdk-c-wrapper/fm_wrapper.h):**
+```c
+// Set MF (Manual Focus) Assist Mode for focus peaking
+int fm_set_mf_assist_mode(int mode);
+
+// Get current MF Assist Mode
+int fm_get_mf_assist_mode(int* mode);
+```
+
+**C Wrapper (sdk-c-wrapper/fm_wrapper.c):**
+```c
+int fm_set_mf_assist_mode(int mode) {
+    if (!g_connected) {
+        if (g_verbose) fprintf(stderr, "fm_set_mf_assist_mode: camera not connected\n");
+        return -1;
+    }
+
+    XSDK_PROP_VARIANT variant;
+    variant.Type = XSDK_TYPE_UINT16;
+    variant.Data.v_uint16 = (uint16_t)mode;
+
+    XSDK_RESULT result = XSDK_SetProp(g_hDevice, kFUJIFILM_PROP_DISP_MF_ASSIST_MODE, &variant);
+    if (result != XSDK_RESULT_OK) {
+        if (g_verbose) fprintf(stderr, "fm_set_mf_assist_mode: XSDK_SetProp failed: %d\n", result);
+        return -2;
+    }
+
+    if (g_verbose) fprintf(stderr, "fm_set_mf_assist_mode: mode set to 0x%04X\n", mode);
+    return 0;
+}
+
+int fm_get_mf_assist_mode(int* mode) {
+    if (!g_connected) {
+        if (g_verbose) fprintf(stderr, "fm_get_mf_assist_mode: camera not connected\n");
+        return -1;
+    }
+
+    XSDK_PROP_VARIANT variant;
+    XSDK_RESULT result = XSDK_GetProp(g_hDevice, kFUJIFILM_PROP_DISP_MF_ASSIST_MODE, &variant);
+    if (result != XSDK_RESULT_OK) {
+        if (g_verbose) fprintf(stderr, "fm_get_mf_assist_mode: XSDK_GetProp failed: %d\n", result);
+        return -2;
+    }
+
+    *mode = (int)variant.Data.v_uint16;
+    if (g_verbose) fprintf(stderr, "fm_get_mf_assist_mode: current mode 0x%04X\n", *mode);
+    return 0;
+}
+```
+
+**Go SDK (pkg/sdk/sdk.go):**
+```go
+// MFAssistMode represents manual focus assist modes
+type MFAssistMode int
+
+const (
+    MFAssistStandard         MFAssistMode = 0x0001  // No assist
+    MFAssistSplitBW          MFAssistMode = 0x0002  // Split image B&W
+    MFAssistSplitColor       MFAssistMode = 0x0003  // Split image color
+    MFAssistPeakWhite        MFAssistMode = 0x0004  // White peaking
+    MFAssistPeakRed          MFAssistMode = 0x0005  // Red peaking
+    MFAssistPeakBlue         MFAssistMode = 0x0006  // Blue peaking
+    MFAssistPeakYellow       MFAssistMode = 0x0008  // Yellow peaking
+    MFAssistPeakWhiteLow     MFAssistMode = 0x8004  // White peaking (low)
+    MFAssistPeakRedLow       MFAssistMode = 0x8005  // Red peaking (low)
+    MFAssistPeakBlueLow      MFAssistMode = 0x8006  // Blue peaking (low)
+    MFAssistPeakYellowLow    MFAssistMode = 0x8008  // Yellow peaking (low)
+    MFAssistMicroprism       MFAssistMode = 0x0010  // Digital microprism
+)
+
+func (m MFAssistMode) String() string {
+    switch m {
+    case MFAssistStandard:
+        return "Standard"
+    case MFAssistSplitBW:
+        return "Split Image (B&W)"
+    case MFAssistSplitColor:
+        return "Split Image (Color)"
+    case MFAssistPeakWhite:
+        return "Focus Peak (White)"
+    case MFAssistPeakRed:
+        return "Focus Peak (Red)"
+    case MFAssistPeakBlue:
+        return "Focus Peak (Blue)"
+    case MFAssistPeakYellow:
+        return "Focus Peak (Yellow)"
+    case MFAssistPeakWhiteLow:
+        return "Focus Peak (White Low)"
+    case MFAssistPeakRedLow:
+        return "Focus Peak (Red Low)"
+    case MFAssistPeakBlueLow:
+        return "Focus Peak (Blue Low)"
+    case MFAssistPeakYellowLow:
+        return "Focus Peak (Yellow Low)"
+    case MFAssistMicroprism:
+        return "Digital Microprism"
+    default:
+        return "Unknown"
+    }
+}
+
+// SetMFAssistMode sets the manual focus assist mode
+func (c *Camera) SetMFAssistMode(mode MFAssistMode) error {
+    if !c.connected {
+        return fmt.Errorf("camera not connected")
+    }
+
+    result := C.fm_set_mf_assist_mode(C.int(mode))
+    if result == 0 {
+        return nil
+    }
+    return fmt.Errorf("failed to set MF assist mode, code: %d", result)
+}
+
+// GetMFAssistMode returns the current manual focus assist mode
+func (c *Camera) GetMFAssistMode() (MFAssistMode, error) {
+    if !c.connected {
+        return 0, fmt.Errorf("camera not connected")
+    }
+
+    var mode C.int
+    result := C.fm_get_mf_assist_mode(&mode)
+    if result == 0 {
+        return MFAssistMode(mode), nil
+    }
+    return 0, fmt.Errorf("failed to get MF assist mode, code: %d", result)
+}
+```
+
+**HAL Interface (pkg/hal/hal.go):**
+```go
+type Camera interface {
+    // ... existing methods ...
+
+    // Focus assist
+    SetMFAssistMode(mode int) error
+    GetMFAssistMode() (int, error)
+}
+```
+
+**HAL Real Implementation (pkg/hal/real.go):**
+```go
+// SetMFAssistMode sets the manual focus assist mode
+func (r *RealCamera) SetMFAssistMode(mode int) error {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+
+    if !r.connected {
+        return fmt.Errorf("camera not connected")
+    }
+
+    if r.sdkCamera == nil {
+        return fmt.Errorf("SDK camera not initialized")
+    }
+
+    return r.sdkCamera.SetMFAssistMode(sdk.MFAssistMode(mode))
+}
+
+// GetMFAssistMode returns the current manual focus assist mode
+func (r *RealCamera) GetMFAssistMode() (int, error) {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+
+    if !r.connected {
+        return 0, fmt.Errorf("camera not connected")
+    }
+
+    if r.sdkCamera == nil {
+        return 0, fmt.Errorf("SDK camera not initialized")
+    }
+
+    mode, err := r.sdkCamera.GetMFAssistMode()
+    return int(mode), err
+}
+```
+
+**HAL Fake Implementation (pkg/hal/fake.go):**
+```go
+// Add field to FakeCamera struct
+type FakeCamera struct {
+    // ... existing fields ...
+    mfAssistMode int
+}
+
+// Initialize in NewFakeCamera
+func NewFakeCamera() *FakeCamera {
+    return &FakeCamera{
+        // ... existing fields ...
+        mfAssistMode: 0x0001, // Default to Standard
+    }
+}
+
+// SetMFAssistMode sets the manual focus assist mode (fake)
+func (f *FakeCamera) SetMFAssistMode(mode int) error {
+    f.mu.Lock()
+    defer f.mu.Unlock()
+
+    if !f.connected {
+        return fmt.Errorf("camera not connected")
+    }
+
+    // Validate mode
+    validModes := []int{0x0001, 0x0002, 0x0003, 0x0004, 0x0005, 0x0006, 0x0008,
+                        0x8004, 0x8005, 0x8006, 0x8008, 0x0010}
+    valid := false
+    for _, v := range validModes {
+        if mode == v {
+            valid = true
+            break
+        }
+    }
+
+    if !valid {
+        return fmt.Errorf("invalid MF assist mode: 0x%04X", mode)
+    }
+
+    f.mfAssistMode = mode
+    fmt.Printf("Fake camera: MF Assist mode set to 0x%04X\n", mode)
+    return nil
+}
+
+// GetMFAssistMode returns the current manual focus assist mode (fake)
+func (f *FakeCamera) GetMFAssistMode() (int, error) {
+    f.mu.Lock()
+    defer f.mu.Unlock()
+
+    if !f.connected {
+        return 0, fmt.Errorf("camera not connected")
+    }
+
+    return f.mfAssistMode, nil
+}
+```
+
+**API Types (pkg/api/types.go):**
+```go
+// MF Assist Mode requests/responses
+type MFAssistSetRequest struct {
+    Mode string `json:"mode"` // "standard", "peak_white", "peak_red", etc.
+}
+
+type MFAssistSetResponse struct {
+    Mode string `json:"mode"`
+}
+
+type MFAssistGetResponse struct {
+    Mode string `json:"mode"`
+}
+```
+
+**API Handlers (pkg/api/handlers.go):**
+```go
+// handleMFAssist handles both GET and POST for MF Assist mode
+func (s *Server) handleMFAssist(w http.ResponseWriter, r *http.Request) {
+    if r.Method == http.MethodGet {
+        s.handleGetMFAssist(w, r)
+    } else if r.Method == http.MethodPost {
+        s.handleSetMFAssist(w, r)
+    } else {
+        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+    }
+}
+
+func (s *Server) handleGetMFAssist(w http.ResponseWriter, r *http.Request) {
+    mode, err := s.state.Camera.GetMFAssistMode()
+    if err != nil {
+        sendError(w, http.StatusInternalServerError, err.Error())
+        return
+    }
+
+    sendJSON(w, MFAssistGetResponse{
+        Mode: mfAssistModeToString(mode),
+    })
+}
+
+func (s *Server) handleSetMFAssist(w http.ResponseWriter, r *http.Request) {
+    var req MFAssistSetRequest
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        sendError(w, http.StatusBadRequest, "Invalid request body")
+        return
+    }
+
+    modeInt, err := mfAssistModeFromString(req.Mode)
+    if err != nil {
+        sendError(w, http.StatusBadRequest, err.Error())
+        return
+    }
+
+    if err := s.state.Camera.SetMFAssistMode(modeInt); err != nil {
+        sendError(w, http.StatusInternalServerError, err.Error())
+        return
+    }
+
+    sendJSON(w, MFAssistSetResponse{
+        Mode: req.Mode,
+    })
+}
+
+// Helper functions for mode conversion
+func mfAssistModeToString(mode int) string {
+    switch mode {
+    case 0x0001:
+        return "standard"
+    case 0x0002:
+        return "split_bw"
+    case 0x0003:
+        return "split_color"
+    case 0x0004:
+        return "peak_white"
+    case 0x0005:
+        return "peak_red"
+    case 0x0006:
+        return "peak_blue"
+    case 0x0008:
+        return "peak_yellow"
+    case 0x8004:
+        return "peak_white_low"
+    case 0x8005:
+        return "peak_red_low"
+    case 0x8006:
+        return "peak_blue_low"
+    case 0x8008:
+        return "peak_yellow_low"
+    case 0x0010:
+        return "microprism"
+    default:
+        return "unknown"
+    }
+}
+
+func mfAssistModeFromString(mode string) (int, error) {
+    switch mode {
+    case "standard":
+        return 0x0001, nil
+    case "split_bw":
+        return 0x0002, nil
+    case "split_color":
+        return 0x0003, nil
+    case "peak_white":
+        return 0x0004, nil
+    case "peak_red":
+        return 0x0005, nil
+    case "peak_blue":
+        return 0x0006, nil
+    case "peak_yellow":
+        return 0x0008, nil
+    case "peak_white_low":
+        return 0x8004, nil
+    case "peak_red_low":
+        return 0x8005, nil
+    case "peak_blue_low":
+        return 0x8006, nil
+    case "peak_yellow_low":
+        return 0x8008, nil
+    case "microprism":
+        return 0x0010, nil
+    default:
+        return 0, fmt.Errorf("unknown MF assist mode: %s", mode)
+    }
+}
+```
+
+**API Routes (pkg/api/server.go):**
+```go
+// In registerRoutes()
+mux.HandleFunc("/api/mf-assist", s.handleMFAssist)
+```
+
+**UI Implementation (static/liveview.html):**
+```html
+<!-- MF Assist Mode dropdown -->
+<div id="mf-assist-control">
+  <label for="mf-assist-mode">Focus Peaking:</label>
+  <select id="mf-assist-mode">
+    <option value="standard" selected>None (Standard)</option>
+    <option value="split_bw">Split Image (B&W)</option>
+    <option value="split_color">Split Image (Color)</option>
+    <option value="peak_white">Peak White</option>
+    <option value="peak_red">Peak Red</option>
+    <option value="peak_blue">Peak Blue</option>
+    <option value="peak_yellow">Peak Yellow</option>
+    <option value="peak_white_low">Peak White (Low)</option>
+    <option value="peak_red_low">Peak Red (Low)</option>
+    <option value="peak_blue_low">Peak Blue (Low)</option>
+    <option value="peak_yellow_low">Peak Yellow (Low)</option>
+    <option value="microprism">Digital Microprism</option>
+  </select>
+</div>
+
+<script>
+// Handle MF Assist mode changes
+document.getElementById('mf-assist-mode').addEventListener('change', async (e) => {
+  const mode = e.target.value;
+
+  try {
+    const response = await fetch('/api/mf-assist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: mode })
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      alert('Failed to set MF Assist mode: ' + error.message);
+      return;
+    }
+
+    console.log('MF Assist mode set to:', mode);
+  } catch (error) {
+    alert('Error setting MF Assist mode: ' + error.message);
+  }
+});
+
+// Load current MF Assist mode on page load
+async function loadMFAssistMode() {
+  try {
+    const response = await fetch('/api/mf-assist');
+    const data = await response.json();
+    document.getElementById('mf-assist-mode').value = data.mode;
+  } catch (error) {
+    console.error('Failed to load MF Assist mode:', error);
+  }
+}
+
+window.addEventListener('load', loadMFAssistMode);
+</script>
+```
+
+**User Workflow:**
+1. User opens live view in browser
+2. Selects focus peaking mode from dropdown (default: "None (Standard)")
+3. Camera immediately applies focus peaking overlay to live view
+4. User adjusts manual focus while watching peaking highlights
+5. In-focus areas are highlighted with selected color (white/red/blue/yellow)
+6. User can change peaking color/intensity or disable peaking at any time
+
+**Acceptance Criteria:**
+- [ ] C wrapper functions implemented and compiling
+- [ ] Go SDK bindings working
+- [ ] HAL interface updated (real + fake implementations)
+- [ ] API endpoints working (/api/mf-assist GET and POST)
+- [ ] Dropdown UI control added to live view page
+- [ ] All 12 MF assist modes supported
+- [ ] Default mode "standard" (no peaking)
+- [ ] Mode changes apply immediately to live view
+- [ ] Tested with real X-T3 camera
+- [ ] Focus peaking visible in browser live view
+- [ ] Works in conjunction with E-6 zoom features
+
+**Testing Plan:**
+1. Build C wrapper with new functions
+2. Test SDK functions with real camera (verify peaking appears)
+3. Test all 12 modes (standard, split images, all peaking colors)
+4. Test API endpoints (GET current mode, POST to change mode)
+5. Test UI dropdown (mode selection updates camera)
+6. Test default behavior (starts with "standard" mode)
+7. Integration test: Use peaking + zoom features together
+
+**Status:** 📋 **Ready for Implementation** - Full stack feature requiring C/Go/API/UI changes
+
+---
+
 ## Story Progress Summary
 
-**Total Stories:** 26
+**Total Stories:** 28
 - ✅ **Completed:** 17 (A-1, A-2, A-3, B-1, B-2, B-3, C-1, C-2, C-3, D-1, D-2, D-3, E-1, E-2, F-2, G-1, G-2)
 - 🔄 **In Progress:** 1 (F-3)
-- 📋 **Not Started:** 8 (E-3, E-4, E-5, F-1, F-4, F-5, F-6, F-7, G-3, G-4, G-5)
+- 📋 **Not Started:** 10 (E-3, E-4, E-5, E-6, E-7, F-1, F-4, F-5, F-6, F-7, G-3, G-4, G-5)
 - ❌ **Blocked:** 0
 
 **Epic Progress:**
@@ -576,11 +1303,11 @@ File: jupiter_video_0001.MOV
 - Epic B: HAL, Shell & Basic Workflows - 3/3 completed (100%) ✅
 - Epic C: Hardware Integration & Real Camera - 3/3 completed (100%) ✅
 - Epic D: Intervalometer & Battery Handling - 3/3 completed (100%) ✅
-- Epic E: Polishing & Optional Features - 2/5 completed (40%)
+- Epic E: Polishing & Optional Features - 2/7 completed (29%)
 - Epic F: Refactoring & Architecture - 1/8 completed (13%) 🔄
 - Epic G: Network & Remote Control - 2/5 completed (40%) 🚀
 
-**Overall Progress:** 17/26 stories completed (65%)
+**Overall Progress:** 17/28 stories completed (61%)
 
 **MVP Status:** ✅ **COMPLETE** - All core functionality for tethered shooting implemented and tested with real X-T3 camera
 
