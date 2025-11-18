@@ -67,15 +67,16 @@ func New(projectName, outputDir string, camera hal.Camera) (*Session, error) {
 	}, nil
 }
 
-// GetNextFilename generates the next sequential filename
-// Format: projectname_0001.RAF
+// GetNextFilename generates the next sequential filename (base name without extension)
+// Format: projectname_0001
+// The SDK will add appropriate extension(s) based on image quality setting (.RAF, .JPG, or both)
 func (s *Session) GetNextFilename() string {
-	return fmt.Sprintf("%s_%04d.RAF", s.ProjectName, s.SequenceNumber)
+	return fmt.Sprintf("%s_%04d", s.ProjectName, s.SequenceNumber)
 }
 
-// GetNextFilePath returns the full path for the next capture
+// GetNextFilePath returns the full path for the next capture (with .RAF extension for backwards compatibility)
 func (s *Session) GetNextFilePath() string {
-	return filepath.Join(s.OutputDir, s.GetNextFilename())
+	return filepath.Join(s.OutputDir, s.GetNextFilename()+".RAF")
 }
 
 // Capture performs a synchronous capture and download operation
@@ -90,30 +91,37 @@ func (s *Session) Capture() error {
 	}
 
 	// Check for file collision and skip to next available sequence number
-	filePath := s.GetNextFilePath()
-	for fileExists(filePath) {
+	// Check both .RAF and .JPG extensions since SDK may create either or both
+	basePath := filepath.Join(s.OutputDir, s.GetNextFilename())
+	for fileExists(basePath+".RAF") || fileExists(basePath+".JPG") {
 		s.SequenceNumber++
-		filePath = s.GetNextFilePath()
+		basePath = filepath.Join(s.OutputDir, s.GetNextFilename())
 	}
 
-	filename := s.GetNextFilename()
+	baseFilename := s.GetNextFilename()
 
 	// Trigger camera capture
 	if err := s.camera.Capture(); err != nil {
 		return fmt.Errorf("capture failed: %w", err)
 	}
 
-	// Download the captured image
-	if err := s.camera.DownloadLast(s.OutputDir, filename); err != nil {
+	// Download the captured image(s)
+	// SDK will create .RAF and/or .JPG file(s) based on camera quality setting
+	if err := s.camera.DownloadLast(s.OutputDir, baseFilename); err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
 
-	// Track latest capture for preview
-	s.LatestCapturePath = filePath
+	// Track latest capture for preview - prefer JPEG if available (faster to load)
+	jpgPath := basePath + ".JPG"
+	rafPath := basePath + ".RAF"
+	if fileExists(jpgPath) {
+		s.LatestCapturePath = jpgPath
+	} else {
+		s.LatestCapturePath = rafPath
+	}
 
-	// Convert in background if enabled
-	if s.ConvertFormat != "none" {
-		rafPath := filepath.Join(s.OutputDir, filename)
+	// Convert RAF in background if enabled (only if RAF file exists)
+	if s.ConvertFormat != "none" && fileExists(rafPath) {
 		go s.convertAndCleanup(rafPath)
 	}
 
@@ -194,21 +202,25 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-// GetNextStandaloneFilename finds the next available capture_NNNN.RAF filename in the given directory
+// GetNextStandaloneFilename finds the next available capture_NNNN base filename in the given directory
 // This is used for standalone captures without a session
+// Returns base name without extension (e.g., "capture_0001") since SDK adds appropriate extensions
 func GetNextStandaloneFilename(outputDir string) (string, error) {
 	// Ensure output directory exists
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Find next available number
+	// Find next available number by checking for collision with both .RAF and .JPG
 	sequenceNum := 1
 	for {
-		filename := fmt.Sprintf("capture_%04d.RAF", sequenceNum)
-		filePath := filepath.Join(outputDir, filename)
-		if !fileExists(filePath) {
-			return filename, nil
+		baseFilename := fmt.Sprintf("capture_%04d", sequenceNum)
+		rafPath := filepath.Join(outputDir, baseFilename+".RAF")
+		jpgPath := filepath.Join(outputDir, baseFilename+".JPG")
+
+		// Check if either file exists
+		if !fileExists(rafPath) && !fileExists(jpgPath) {
+			return baseFilename, nil
 		}
 		sequenceNum++
 

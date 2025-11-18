@@ -16,6 +16,8 @@ int fm_set_exposure_mode(int mode);
 int fm_get_exposure_mode(int* mode);
 int fm_get_iso(int* iso);
 int fm_set_iso(int iso);
+int fm_get_image_quality(int* quality);
+int fm_set_image_quality(int quality);
 int fm_capture();
 int fm_download_last(const char* outdir, const char* filename);
 int fm_get_supported_shutter_count(int* count);

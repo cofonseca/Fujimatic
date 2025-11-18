@@ -446,6 +446,86 @@ func (s *Server) handleSettingsFocus(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleSettingsQuality(w http.ResponseWriter, r *http.Request) {
+	camera := s.state.GetCamera()
+
+	if !camera.IsConnected() {
+		s.sendError(w, http.StatusServiceUnavailable, "Camera not connected")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		quality, err := camera.GetImageQuality()
+		if err != nil {
+			s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get image quality: %v", err))
+			return
+		}
+		// Convert int quality to string
+		qualityStr := imageQualityToString(quality)
+		s.sendJSON(w, http.StatusOK, QualityGetResponse{
+			Quality:    qualityStr,
+			Status:     "ok",
+			StatusCode: 200,
+		})
+
+	case http.MethodPost:
+		var req QualitySetRequest
+		if err := s.parseJSON(r, &req); err != nil {
+			s.sendError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err))
+			return
+		}
+
+		// Convert string quality to int
+		qualityInt, err := imageQualityFromString(req.Quality)
+		if err != nil {
+			s.sendError(w, http.StatusBadRequest, fmt.Sprintf("Invalid image quality: %v", err))
+			return
+		}
+
+		// Auto-stop live view if active (required for image quality changes)
+		var liveViewWasActive bool
+		active, err := camera.IsLiveViewActive()
+		if err == nil && active {
+			liveViewWasActive = true
+			logger.Info("Auto-stopping live view before image quality change...")
+			if err := camera.StopLiveView(); err != nil {
+				logger.Error("Failed to stop live view: %v", err)
+				// Continue with quality change anyway
+			} else {
+				logger.Info("Live view stopped successfully")
+				// Small delay to ensure live view is fully stopped before proceeding
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+
+		if err := camera.SetImageQuality(qualityInt); err != nil {
+			s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to set image quality: %v", err))
+			return
+		}
+
+		// Auto-restart live view if it was active before
+		if liveViewWasActive {
+			logger.Info("Auto-restarting live view after image quality change...")
+			if err := camera.StartLiveView(); err != nil {
+				logger.Error("Failed to restart live view: %v", err)
+				// Don't fail the quality change - just log the error
+			} else {
+				logger.Info("Live view restarted successfully")
+			}
+		}
+
+		s.sendJSON(w, http.StatusOK, QualitySetResponse{
+			Quality:    imageQualityToString(qualityInt),
+			Status:     "ok",
+			StatusCode: 200,
+		})
+
+	default:
+		s.sendError(w, http.StatusMethodNotAllowed, "Method not allowed")
+	}
+}
+
 // Conversion Settings Handler
 
 func (s *Server) handleSettingsConversion(w http.ResponseWriter, r *http.Request) {
@@ -545,51 +625,6 @@ func (s *Server) handleFocusTrigger(w http.ResponseWriter, r *http.Request) {
 	s.sendJSON(w, http.StatusOK, FocusTriggerResponse{
 		Status:     "ok",
 		Message:    "Autofocus triggered successfully",
-		StatusCode: 200,
-	})
-}
-
-// handleFocusAdjust adjusts focus manually in NEAR or FAR direction
-func (s *Server) handleFocusAdjust(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		s.sendError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
-	camera := s.state.GetCamera()
-	if !camera.IsConnected() {
-		s.sendError(w, http.StatusServiceUnavailable, "Camera not connected")
-		return
-	}
-
-	var req FocusAdjustRequest
-	if err := s.parseJSON(r, &req); err != nil {
-		s.sendError(w, http.StatusBadRequest, "Invalid JSON request")
-		return
-	}
-
-	// Validate direction
-	if req.Direction != "near" && req.Direction != "far" {
-		s.sendError(w, http.StatusBadRequest, "Invalid direction (must be 'near' or 'far')")
-		return
-	}
-
-	// Validate steps (must be positive)
-	if req.Steps <= 0 {
-		s.sendError(w, http.StatusBadRequest, "Invalid steps (must be positive)")
-		return
-	}
-
-	if err := camera.AdjustFocus(req.Direction, req.Steps); err != nil {
-		s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to adjust focus: %v", err))
-		return
-	}
-
-	s.sendJSON(w, http.StatusOK, FocusAdjustResponse{
-		Status:     "ok",
-		Message:    fmt.Sprintf("Focus adjusted %s by %d steps", req.Direction, req.Steps),
-		Direction:  req.Direction,
-		Steps:      req.Steps,
 		StatusCode: 200,
 	})
 }
@@ -1036,14 +1071,28 @@ func (s *Server) handleCaptureLatestPreview(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Extract JPEG thumbnail from RAF file using LibRaw
-	thumbData, err := converter.ExtractThumbnail(sess.LatestCapturePath)
-	if err != nil {
-		s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to extract thumbnail: %v", err))
-		return
+	// Check file extension to determine how to serve preview
+	ext := strings.ToLower(filepath.Ext(sess.LatestCapturePath))
+	var thumbData []byte
+	var err error
+
+	if ext == ".jpg" || ext == ".jpeg" {
+		// JPEG file - serve directly (already compressed)
+		thumbData, err = os.ReadFile(sess.LatestCapturePath)
+		if err != nil {
+			s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to read JPEG: %v", err))
+			return
+		}
+	} else {
+		// RAF file - extract embedded JPEG thumbnail using LibRaw
+		thumbData, err = converter.ExtractThumbnail(sess.LatestCapturePath)
+		if err != nil {
+			s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to extract thumbnail: %v", err))
+			return
+		}
 	}
 
-	// Serve the JPEG thumbnail
+	// Serve the JPEG image/thumbnail
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(thumbData)))

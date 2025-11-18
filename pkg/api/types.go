@@ -77,6 +77,22 @@ type FocusSetResponse struct {
 	StatusCode int    `json:"status_code"`
 }
 
+type QualityGetResponse struct {
+	Quality    string `json:"quality"`    // "RAW", "FINE", "NORMAL", "RAW+FINE", "RAW+NORMAL"
+	Status     string `json:"status"`
+	StatusCode int    `json:"status_code"`
+}
+
+type QualitySetRequest struct {
+	Quality string `json:"quality"` // "RAW", "FINE", "NORMAL", "RAW+JPEG" (maps to RAW+NORMAL)
+}
+
+type QualitySetResponse struct {
+	Quality    string `json:"quality"`
+	Status     string `json:"status"`
+	StatusCode int    `json:"status_code"`
+}
+
 // Session Management
 
 type SessionGetResponse struct {
@@ -173,19 +189,6 @@ type LiveViewStopResponse struct {
 type FocusTriggerResponse struct {
 	Status     string `json:"status"`
 	Message    string `json:"message"`
-	StatusCode int    `json:"status_code"`
-}
-
-type FocusAdjustRequest struct {
-	Direction string `json:"direction"` // "near" or "far"
-	Steps     int    `json:"steps"`     // Number of focus steps to move (positive integer)
-}
-
-type FocusAdjustResponse struct {
-	Status     string `json:"status"`
-	Message    string `json:"message"`
-	Direction  string `json:"direction"`
-	Steps      int    `json:"steps"`
 	StatusCode int    `json:"status_code"`
 }
 

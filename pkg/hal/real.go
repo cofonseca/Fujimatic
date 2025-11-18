@@ -204,6 +204,39 @@ func (r *RealCamera) SetISO(iso int) error {
 	return r.sdkCamera.SetISO(iso)
 }
 
+// GetImageQuality returns the current image quality setting
+func (r *RealCamera) GetImageQuality() (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.connected {
+		return 0, fmt.Errorf("camera not connected")
+	}
+
+	if r.sdkCamera == nil {
+		return 0, fmt.Errorf("SDK camera not initialized")
+	}
+
+	quality, err := r.sdkCamera.GetImageQuality()
+	return int(quality), err
+}
+
+// SetImageQuality sets the image quality mode
+func (r *RealCamera) SetImageQuality(quality int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	if r.sdkCamera == nil {
+		return fmt.Errorf("SDK camera not initialized")
+	}
+
+	return r.sdkCamera.SetImageQuality(sdk.ImageQuality(quality))
+}
+
 // GetSupportedShutterSpeeds returns the list of supported shutter speeds in microseconds
 func (r *RealCamera) GetSupportedShutterSpeeds() ([]int, error) {
 	r.mu.Lock()

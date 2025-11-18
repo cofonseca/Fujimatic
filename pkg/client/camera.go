@@ -266,6 +266,49 @@ func focusModeFromString(mode string) (int, error) {
 	}
 }
 
+// Image quality constants (same as API server)
+const (
+	ImageQualityRAW       = 0x0001
+	ImageQualityFine      = 0x0002
+	ImageQualityNormal    = 0x0003
+	ImageQualityRAWFine   = 0x0004
+	ImageQualityRAWNormal = 0x0005
+)
+
+func imageQualityToString(quality int) string {
+	switch quality {
+	case ImageQualityRAW:
+		return "RAW"
+	case ImageQualityFine:
+		return "FINE"
+	case ImageQualityNormal:
+		return "NORMAL"
+	case ImageQualityRAWFine:
+		return "RAW+FINE"
+	case ImageQualityRAWNormal:
+		return "RAW+JPEG"
+	default:
+		return "unknown"
+	}
+}
+
+func imageQualityFromString(quality string) (int, error) {
+	switch quality {
+	case "RAW":
+		return ImageQualityRAW, nil
+	case "FINE":
+		return ImageQualityFine, nil
+	case "NORMAL":
+		return ImageQualityNormal, nil
+	case "RAW+FINE":
+		return ImageQualityRAWFine, nil
+	case "RAW+JPEG", "RAW+NORMAL":
+		return ImageQualityRAWNormal, nil
+	default:
+		return 0, fmt.Errorf("unknown image quality: %s", quality)
+	}
+}
+
 // Accessor methods for connectivity testing
 
 // GetBaseURL returns the base URL of the server
@@ -351,4 +394,24 @@ func (c *RemoteCamera) SetLiveViewSize(size int) error {
 	// Server automatically uses medium size (640px)
 	// No need to expose this to remote clients
 	return nil
+}
+
+// GetImageQuality returns the current image quality setting
+func (c *RemoteCamera) GetImageQuality() (int, error) {
+	var resp api.QualityGetResponse
+	if err := c.get("/api/settings/quality", &resp); err != nil {
+		return 0, err
+	}
+	// Convert string back to int (reverse of server conversion)
+	return imageQualityFromString(resp.Quality)
+}
+
+// SetImageQuality sets the image quality setting
+func (c *RemoteCamera) SetImageQuality(quality int) error {
+	// Convert int to string (same as server does)
+	qualityStr := imageQualityToString(quality)
+
+	req := api.QualitySetRequest{Quality: qualityStr}
+	var resp api.QualitySetResponse
+	return c.post("/api/settings/quality", req, &resp)
 }

@@ -258,6 +258,67 @@ func (c *Camera) SetISO(iso int) error {
 	return fmt.Errorf("failed to set ISO, code: %d", result)
 }
 
+// ImageQuality represents camera image quality modes
+type ImageQuality int
+
+const (
+	ImageQualityRAW        ImageQuality = 0x0001 // RAW only
+	ImageQualityFine       ImageQuality = 0x0002 // JPEG Fine only
+	ImageQualityNormal     ImageQuality = 0x0003 // JPEG Normal only
+	ImageQualityRAWFine    ImageQuality = 0x0004 // RAW + JPEG Fine
+	ImageQualityRAWNormal  ImageQuality = 0x0005 // RAW + JPEG Normal
+)
+
+func (q ImageQuality) String() string {
+	switch q {
+	case ImageQualityRAW:
+		return "RAW"
+	case ImageQualityFine:
+		return "FINE"
+	case ImageQualityNormal:
+		return "NORMAL"
+	case ImageQualityRAWFine:
+		return "RAW+FINE"
+	case ImageQualityRAWNormal:
+		return "RAW+NORMAL"
+	default:
+		return "Unknown"
+	}
+}
+
+// GetImageQuality returns the current image quality setting
+func (c *Camera) GetImageQuality() (ImageQuality, error) {
+	if !c.connected {
+		return 0, fmt.Errorf("camera not connected")
+	}
+
+	var quality C.int
+	result := C.fm_get_image_quality(&quality)
+
+	if result == 0 {
+		return ImageQuality(quality), nil
+	}
+	return 0, fmt.Errorf("failed to get image quality, code: %d", result)
+}
+
+// SetImageQuality sets the image quality mode
+func (c *Camera) SetImageQuality(quality ImageQuality) error {
+	if !c.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	// Validate quality value
+	if quality < ImageQualityRAW || quality > ImageQualityRAWNormal {
+		return fmt.Errorf("invalid image quality: 0x%04X", quality)
+	}
+
+	result := C.fm_set_image_quality(C.int(quality))
+	if result == 0 {
+		return nil
+	}
+	return fmt.Errorf("failed to set image quality, code: %d", result)
+}
+
 // FocusMode represents camera focus modes
 type FocusMode int
 

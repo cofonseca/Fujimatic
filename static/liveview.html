@@ -410,6 +410,18 @@
 
             <div class="control-row">
                 <div class="control-group">
+                    <label for="qualitySelect">Image Quality</label>
+                    <select id="qualitySelect">
+                        <option value="RAW">RAW</option>
+                        <option value="RAW+JPEG">RAW+JPEG</option>
+                        <option value="NORMAL">JPEG (Normal)</option>
+                    </select>
+                </div>
+                <button onclick="setQuality()" class="secondary">Set Quality</button>
+            </div>
+
+            <div class="control-row">
+                <div class="control-group">
                     <label for="shutterSelect">Shutter Speed</label>
                     <select id="shutterSelect">
                         <option value="1/8000">1/8000</option>
@@ -543,62 +555,6 @@
             </div>
         </div>
 
-        <h2 style="opacity: 0.5;">🎯 Manual Focus Adjustments</h2>
-        <p class="subtitle" style="margin-bottom: 10px; opacity: 0.5; text-decoration: line-through;">Fine-tune focus for astrophotography (works in manual focus mode)</p>
-
-        <div style="background: #2a2a2a; border: 2px dashed #555; border-radius: 8px; padding: 15px; margin-bottom: 15px;">
-            <p style="color: #ff6b6b; margin: 0 0 8px 0; font-weight: bold;">⚠️ Feature Not Available</p>
-            <p style="color: #aaa; margin: 0; font-size: 0.9rem; line-height: 1.5;">
-                Programmatic focus adjustments require lenses that expose focus position data to the Fujifilm SDK.
-                The XF 18-55mm and XF 50-140mm lenses do not support this feature.
-                <strong>Use the camera's manual focus ring</strong> with live view magnification for precise focusing.
-            </p>
-        </div>
-
-        <div class="camera-controls" style="opacity: 0.3; pointer-events: none;">
-            <!-- Fine Adjustment Buttons -->
-            <div class="control-row">
-                <div style="flex: 1; text-align: center;">
-                    <label style="display: block; margin-bottom: 10px; color: #888; font-size: 0.9rem;">FINE ADJUSTMENTS (Speed 1)</label>
-                    <div style="display: flex; gap: 10px; justify-content: center;">
-                        <button class="secondary" style="min-width: 100px;" disabled>◄ FAR -1</button>
-                        <button class="secondary" style="min-width: 100px;" disabled>NEAR +1 ►</button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Bidirectional Slider -->
-            <div class="control-row">
-                <div style="flex: 1;">
-                    <label style="display: block; margin-bottom: 10px; color: #888; font-size: 0.9rem;">COARSE SLIDER (Drag & Release)</label>
-                    <div class="focus-slider-container">
-                        <span class="slider-label">FAR</span>
-                        <input type="range" id="focusSlider" min="-8" max="8" value="0" step="1" class="focus-slider" disabled>
-                        <span class="slider-label">NEAR</span>
-                    </div>
-                    <div style="text-align: center; margin-top: 8px; color: #888; font-size: 0.85rem;">
-                        Speed: <span id="sliderSpeed">0</span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Explicit Controls (Speed Dial + Direction Buttons) -->
-            <div class="control-row">
-                <div class="control-group">
-                    <label for="focusStepsSelect">Focus Steps</label>
-                    <select id="focusStepsSelect" disabled>
-                        <option value="1" selected>1 - Fine</option>
-                        <option value="5">5</option>
-                        <option value="10">10</option>
-                        <option value="20">20</option>
-                        <option value="50">50</option>
-                        <option value="100">100 - Coarse</option>
-                    </select>
-                </div>
-                <button class="secondary" disabled>◄ FAR</button>
-                <button class="secondary" disabled>NEAR ►</button>
-            </div>
-        </div>
     </div>
 
     <script>
@@ -772,6 +728,26 @@
                 showSuccess(`ISO set to ${iso}`);
             } catch (err) {
                 showError('Failed to set ISO: ' + err.message);
+            }
+        }
+
+        async function setQuality() {
+            const quality = document.getElementById('qualitySelect').value;
+            try {
+                const response = await fetch('/api/settings/quality', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ quality: quality })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || 'Failed to set image quality');
+                }
+
+                showSuccess(`Image quality set to ${quality}`);
+            } catch (err) {
+                showError('Failed to set quality: ' + err.message);
             }
         }
 
@@ -1240,6 +1216,17 @@
                     console.error('Failed to load ISO:', isoResponse.status);
                 }
 
+                // Load Image Quality
+                const qualityResponse = await fetch('/api/settings/quality');
+                if (qualityResponse.ok) {
+                    const qualityData = await qualityResponse.json();
+                    const qualitySelect = document.getElementById('qualitySelect');
+                    qualitySelect.value = qualityData.quality;
+                    console.log('Quality loaded:', qualityData.quality);
+                } else {
+                    console.error('Failed to load quality:', qualityResponse.status);
+                }
+
                 // Load Shutter Speed
                 const shutterResponse = await fetch('/api/settings/shutter');
                 if (shutterResponse.ok) {
@@ -1316,65 +1303,6 @@
             } catch (err) {
                 console.error('Failed to check initial connection status:', err);
                 updateConnectionUI(false);
-            }
-        });
-
-        // Focus Adjustment Functions
-
-        async function adjustFocus(direction, steps) {
-            try {
-                const response = await fetch('/api/focus/adjust', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        direction: direction,
-                        steps: steps
-                    })
-                });
-
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.message || 'Failed to adjust focus');
-                }
-
-                const result = await response.json();
-                const directionLabel = direction === 'far' ? 'FAR' : 'NEAR';
-                showSuccess(`Focus adjusted ${directionLabel} by ${steps} steps`);
-            } catch (err) {
-                showError('Failed to adjust focus: ' + err.message);
-            }
-        }
-
-        function adjustFocusExplicit(direction) {
-            const steps = parseInt(document.getElementById('focusStepsSelect').value);
-            adjustFocus(direction, steps);
-        }
-
-        // Focus Slider Handling
-        const focusSlider = document.getElementById('focusSlider');
-        const sliderSpeedDisplay = document.getElementById('sliderSpeed');
-
-        // Update steps display as slider moves
-        focusSlider.addEventListener('input', function() {
-            const value = parseInt(this.value);
-            sliderSpeedDisplay.textContent = Math.abs(value);
-        });
-
-        // Send focus adjustment when slider is released
-        focusSlider.addEventListener('change', function() {
-            const value = parseInt(this.value);
-
-            if (value !== 0) {
-                const direction = value > 0 ? 'near' : 'far';
-                const steps = Math.abs(value);
-
-                adjustFocus(direction, steps);
-
-                // Reset slider to center after brief delay
-                setTimeout(() => {
-                    this.value = 0;
-                    sliderSpeedDisplay.textContent = '0';
-                }, 200);
             }
         });
 

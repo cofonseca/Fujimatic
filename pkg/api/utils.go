@@ -203,3 +203,48 @@ func findClosestShutterSpeed(requested int, supported []int) int {
 
 	return closest
 }
+
+// Image quality constants (from SDK)
+const (
+	ImageQualityRAW       = 0x0001
+	ImageQualityFine      = 0x0002
+	ImageQualityNormal    = 0x0003
+	ImageQualityRAWFine   = 0x0004
+	ImageQualityRAWNormal = 0x0005
+)
+
+// imageQualityToString converts integer image quality to string
+func imageQualityToString(quality int) string {
+	switch quality {
+	case ImageQualityRAW:
+		return "RAW"
+	case ImageQualityFine:
+		return "FINE"
+	case ImageQualityNormal:
+		return "NORMAL"
+	case ImageQualityRAWFine:
+		return "RAW+FINE"
+	case ImageQualityRAWNormal:
+		return "RAW+JPEG"
+	default:
+		return "unknown"
+	}
+}
+
+// imageQualityFromString converts string image quality to integer
+func imageQualityFromString(quality string) (int, error) {
+	switch quality {
+	case "RAW":
+		return ImageQualityRAW, nil
+	case "FINE":
+		return ImageQualityFine, nil
+	case "NORMAL":
+		return ImageQualityNormal, nil
+	case "RAW+FINE":
+		return ImageQualityRAWFine, nil
+	case "RAW+JPEG", "RAW+NORMAL":
+		return ImageQualityRAWNormal, nil
+	default:
+		return 0, fmt.Errorf("invalid image quality: %s (valid: RAW, FINE, NORMAL, RAW+FINE, RAW+JPEG)", quality)
+	}
+}

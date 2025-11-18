@@ -66,11 +66,11 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/settings/iso", s.handleSettingsISO)
 	mux.HandleFunc("/api/settings/shutter", s.handleSettingsShutter)
 	mux.HandleFunc("/api/settings/focus", s.handleSettingsFocus)
+	mux.HandleFunc("/api/settings/quality", s.handleSettingsQuality)
 	mux.HandleFunc("/api/settings/conversion", s.handleSettingsConversion)
 
 	// Focus Operations
 	mux.HandleFunc("/api/focus/trigger", s.handleFocusTrigger)
-	mux.HandleFunc("/api/focus/adjust", s.handleFocusAdjust)
 
 	// Session Management
 	mux.HandleFunc("/api/session", s.handleSession)

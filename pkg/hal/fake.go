@@ -12,6 +12,7 @@ type FakeCamera struct {
 	batteryLevel   int
 	shutterSpeed   int
 	iso            int
+	imageQuality   int
 	exposureMode   int
 	focusMode      int
 	captureCount   int
@@ -27,6 +28,7 @@ func NewFakeCamera() *FakeCamera {
 		batteryLevel:   100,
 		shutterSpeed:   1,
 		iso:            800,     // Default ISO
+		imageQuality:   0x0005,  // Default to RAW+NORMAL
 		exposureMode:   0x0006,  // Default to Program mode
 		focusMode:      0x0001,  // Default to Manual focus
 		captureCount:   0,
@@ -192,6 +194,51 @@ func (f *FakeCamera) SetISO(iso int) error {
 	}
 
 	f.iso = iso
+	return nil
+}
+
+// GetImageQuality returns the current image quality setting
+func (f *FakeCamera) GetImageQuality() (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.connected {
+		return 0, fmt.Errorf("camera not connected")
+	}
+
+	return f.imageQuality, nil
+}
+
+// SetImageQuality sets the image quality mode
+func (f *FakeCamera) SetImageQuality(quality int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	// Validate quality value (0x0001=RAW, 0x0002=FINE, 0x0003=NORMAL, 0x0004=RAW+FINE, 0x0005=RAW+NORMAL)
+	if quality < 0x0001 || quality > 0x0005 {
+		return fmt.Errorf("invalid image quality: 0x%04X", quality)
+	}
+
+	f.imageQuality = quality
+
+	qualityName := "Unknown"
+	switch quality {
+	case 0x0001:
+		qualityName = "RAW"
+	case 0x0002:
+		qualityName = "FINE"
+	case 0x0003:
+		qualityName = "NORMAL"
+	case 0x0004:
+		qualityName = "RAW+FINE"
+	case 0x0005:
+		qualityName = "RAW+NORMAL"
+	}
+	fmt.Printf("Fake camera: Image quality set to %s\n", qualityName)
 	return nil
 }
 

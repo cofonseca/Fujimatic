@@ -39,6 +39,13 @@ type Camera interface {
 	// SetISO sets the ISO sensitivity value
 	SetISO(iso int) error
 
+	// GetImageQuality returns the current image quality setting
+	GetImageQuality() (int, error)
+
+	// SetImageQuality sets the image quality mode
+	// quality: 0x0001=RAW, 0x0002=FINE, 0x0003=NORMAL, 0x0004=RAW+FINE, 0x0005=RAW+NORMAL
+	SetImageQuality(quality int) error
+
 	// GetSupportedShutterSpeeds returns the list of supported shutter speeds in microseconds
 	GetSupportedShutterSpeeds() ([]int, error)
 

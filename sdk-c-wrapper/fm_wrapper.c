@@ -174,14 +174,15 @@ int fm_connect() {
     }
 
     // CRITICAL: Give camera time to fully transition to PC mode
-    // Some cameras need 100-200ms to be ready for subsequent settings
+    // Some cameras need extra time to be ready for first capture
+    // Increased to 800ms to prevent "camera not ready" error on first capture
     if (verbose_logging) {
         printf("Waiting for camera to settle into PC control mode...\n");
     }
 #ifdef _WIN32
-    Sleep(150);  // 150ms delay
+    Sleep(800);  // 800ms delay
 #else
-    usleep(150000);
+    usleep(800000);
 #endif
 
     if (verbose_logging) {
@@ -206,6 +207,31 @@ int fm_connect() {
     } else {
         printf("Connected to camera successfully\n");
     }
+
+    // CRITICAL: "Warm up" the camera's capture system
+    // Query buffer capacity to initialize the capture pipeline
+    // This is essential - without it, first capture fails with error 0x1008 (camera not ready)
+    if (verbose_logging) {
+        printf("Initializing camera capture system...\n");
+    }
+
+    long shoot_frames = 0;
+    long total_frames = 0;
+    result = XSDK_GetBufferCapacity(g_hCamera, &shoot_frames, &total_frames);
+    if (result == 0 && verbose_logging) {
+        printf("  Buffer capacity: %ld/%ld frames\n", shoot_frames, total_frames);
+    }
+
+    // Additional settling time for capture system initialization
+    // Some cameras need up to 1 second before first capture is ready
+    if (verbose_logging) {
+        printf("Waiting for capture system to fully initialize (1 second)...\n");
+    }
+    #ifdef _WIN32
+    Sleep(1000);  // 1 second
+    #else
+    usleep(1000000);
+    #endif
 
     printf("Camera ready for PC control\n");
     return 0;
@@ -514,6 +540,58 @@ int fm_set_iso(int iso) {
     return 0;
 }
 
+int fm_get_image_quality(int* quality) {
+    if (g_hCamera == NULL) {
+        fprintf(stderr, "fm_get_image_quality: Camera not connected\n");
+        return -1;
+    }
+
+    if (quality == NULL) {
+        fprintf(stderr, "fm_get_image_quality: quality pointer is NULL\n");
+        return -2;
+    }
+
+    // Get image quality from camera
+    long quality_value = 0;
+    long result = XSDK_GetProp(g_hCamera, XT3_API_CODE_GetImageQuality,
+                               XT3_API_PARAM_GetImageQuality, &quality_value);
+    if (result != 0) {
+        fprintf(stderr, "fm_get_image_quality: XSDK_GetProp failed with code: %ld\n", result);
+        return -3;
+    }
+
+    *quality = (int)quality_value;
+    if (verbose_logging) {
+        printf("Current image quality: 0x%04X\n", *quality);
+    }
+    return 0;
+}
+
+int fm_set_image_quality(int quality) {
+    if (g_hCamera == NULL) {
+        fprintf(stderr, "fm_set_image_quality: Camera not connected\n");
+        return -1;
+    }
+
+    // Validate quality value (0x0001=RAW, 0x0002=FINE, 0x0003=NORMAL, 0x0004=RAW+FINE, 0x0005=RAW+NORMAL)
+    if (quality < 0x0001 || quality > 0x0005) {
+        fprintf(stderr, "fm_set_image_quality: Invalid quality value 0x%04X\n", quality);
+        return -2;
+    }
+
+    long result = XSDK_SetProp(g_hCamera, XT3_API_CODE_SetImageQuality,
+                               XT3_API_PARAM_SetImageQuality, (long)quality);
+    if (result != 0) {
+        fprintf(stderr, "fm_set_image_quality: XSDK_SetProp failed with code: %ld\n", result);
+        return -3;
+    }
+
+    if (verbose_logging) {
+        printf("Image quality set to 0x%04X\n", quality);
+    }
+    return 0;
+}
+
 int fm_capture() {
     if (g_hCamera == NULL) {
         fprintf(stderr, "fm_capture: Camera not connected\n");
@@ -534,12 +612,18 @@ int fm_capture() {
 
     // Retry logic for camera initialization issues
     // Some cameras need extra time after connection before first capture works
-    int max_retries = 3;
-    int retry_delay_ms = 200;
+    int max_retries = 5;  // Increased from 3 to 5
+    int retry_delay_ms = 1000;  // Increased from 500ms to 1000ms
 
     for (int attempt = 0; attempt < max_retries; attempt++) {
-        if (verbose_logging && attempt > 0) {
-            printf("Retry attempt %d/%d...\n", attempt + 1, max_retries);
+        if (attempt > 0) {
+            // Always show retry messages (not just in verbose mode)
+            printf("Retry attempt %d/%d (waiting %dms before retry)...\n", attempt + 1, max_retries, retry_delay_ms);
+#ifdef _WIN32
+            Sleep(retry_delay_ms);
+#else
+            usleep(retry_delay_ms * 1000);
+#endif
         }
 
         if (verbose_logging) {
@@ -549,6 +633,9 @@ int fm_capture() {
 
         if (result == XSDK_COMPLETE) {
             // Success!
+            if (attempt > 0) {
+                printf("Capture succeeded on attempt %d/%d\n", attempt + 1, max_retries);
+            }
             break;
         }
 
@@ -562,16 +649,8 @@ int fm_capture() {
         // 0x8002 = Camera busy
         if (err_code == 0x1008 || err_code == 0x8002) {
             if (attempt < max_retries - 1) {
-                if (verbose_logging) {
-                    fprintf(stderr, "fm_capture: Temporary error (0x%04lX), retrying after %dms...\n",
-                            err_code, retry_delay_ms);
-                }
-#ifdef _WIN32
-                Sleep(retry_delay_ms);
-#else
-                usleep(retry_delay_ms * 1000);
-#endif
-                continue;  // Retry
+                fprintf(stderr, "fm_capture: Temporary error (0x%04lX - camera not ready), will retry...\n", err_code);
+                continue;  // Retry (sleep happens at top of next iteration)
             }
         }
 
@@ -650,7 +729,7 @@ int fm_download_last(const char* outdir, const char* filename) {
         return -2;
     }
 
-    // Check buffer capacity to see if image is available
+    // Check buffer capacity to see how many images are available
     long shoot_frames = 0;
     long total_frames = 0;
     long result = XSDK_GetBufferCapacity(g_hCamera, &shoot_frames, &total_frames);
@@ -664,55 +743,85 @@ int fm_download_last(const char* outdir, const char* filename) {
         return -4;
     }
 
-    // Read image information
-    XSDK_ImageInformation img_info;
-    memset(&img_info, 0, sizeof(img_info));
-    result = XSDK_ReadImageInfo(g_hCamera, &img_info);
-    if (result != 0) {
-        fprintf(stderr, "fm_download_last: XSDK_ReadImageInfo failed with code: %ld\n", result);
-        return -5;
+    if (verbose_logging) {
+        printf("fm_download_last: %ld image(s) in buffer\n", shoot_frames);
     }
 
-    // Allocate buffer for image data
-    unsigned char* image_data = (unsigned char*)malloc(img_info.lDataSize);
-    if (image_data == NULL) {
-        fprintf(stderr, "fm_download_last: Failed to allocate %ld bytes for image\n", img_info.lDataSize);
-        return -6;
-    }
+    // For RAW+JPEG mode: SDK treats this as ONE capture with multiple components
+    // We must download ALL components BEFORE calling DeleteImage
+    // Pattern: ReadInfo->ReadImage (RAF), ReadInfo->ReadImage (JPG), then DeleteImage
+    printf("fm_download_last: Downloading %ld image component(s)...\n", shoot_frames);
 
-    // Read image data
-    result = XSDK_ReadImage(g_hCamera, image_data, img_info.lDataSize);
-    if (result != 0) {
-        fprintf(stderr, "fm_download_last: XSDK_ReadImage failed with code: %ld\n", result);
+    for (int i = 0; i < shoot_frames; i++) {
+        printf("fm_download_last: Processing component %d/%ld\n", i + 1, shoot_frames);
+
+        // Read info for current image component
+        XSDK_ImageInformation img_info;
+        memset(&img_info, 0, sizeof(img_info));
+        result = XSDK_ReadImageInfo(g_hCamera, &img_info);
+        if (result != 0) {
+            fprintf(stderr, "fm_download_last: XSDK_ReadImageInfo[%d] failed with code: %ld\n", i, result);
+            return -5;
+        }
+
+        printf("fm_download_last: Component %d - internal_name='%s', format=0x%04lX, size=%ld bytes\n",
+               i + 1, img_info.strInternalName, img_info.lFormat, img_info.lDataSize);
+
+        // Extract extension from camera's internal filename
+        const char* ext = strrchr(img_info.strInternalName, '.');
+        if (ext == NULL || strlen(img_info.strInternalName) == 0) {
+            fprintf(stderr, "fm_download_last: Warning - No extension in internal name '%s', using .RAF\n",
+                    img_info.strInternalName);
+            ext = ".RAF";
+        }
+
+        // Allocate buffer for image data
+        unsigned char* image_data = (unsigned char*)malloc(img_info.lDataSize);
+        if (image_data == NULL) {
+            fprintf(stderr, "fm_download_last: Failed to allocate %ld bytes for image\n", img_info.lDataSize);
+            return -6;
+        }
+
+        // Read image data
+        result = XSDK_ReadImage(g_hCamera, image_data, img_info.lDataSize);
+        if (result != 0) {
+            fprintf(stderr, "fm_download_last: XSDK_ReadImage[%d] failed with code: %ld\n", i, result);
+            free(image_data);
+            return -7;
+        }
+
+        // Build full file path with extracted extension
+        char filepath[1024];
+        snprintf(filepath, sizeof(filepath), "%s%c%s%s", outdir, PATH_SEP, filename, ext);
+
+        // Write to file
+        FILE* fp = fopen(filepath, "wb");
+        if (fp == NULL) {
+            fprintf(stderr, "fm_download_last: Failed to open file %s for writing\n", filepath);
+            free(image_data);
+            return -8;
+        }
+
+        size_t written = fwrite(image_data, 1, img_info.lDataSize, fp);
+        fclose(fp);
         free(image_data);
-        return -7;
+
+        if (written != (size_t)img_info.lDataSize) {
+            fprintf(stderr, "fm_download_last: Incomplete write (%zu/%ld bytes)\n", written, img_info.lDataSize);
+            return -9;
+        }
+
+        printf("Downloaded image: %s (%ld bytes)\n", filepath, img_info.lDataSize);
     }
 
-    // Build full file path
-    char filepath[1024];
-    snprintf(filepath, sizeof(filepath), "%s%c%s", outdir, PATH_SEP, filename);
-
-    // Write to file
-    FILE* fp = fopen(filepath, "wb");
-    if (fp == NULL) {
-        fprintf(stderr, "fm_download_last: Failed to open file %s for writing\n", filepath);
-        free(image_data);
-        return -8;
+    // Now delete the capture from buffer (after downloading all components)
+    result = XSDK_DeleteImage(g_hCamera);
+    if (result != 0) {
+        fprintf(stderr, "fm_download_last: Warning - XSDK_DeleteImage failed with code: %ld\n", result);
+        // Continue anyway - files are saved
     }
 
-    size_t written = fwrite(image_data, 1, img_info.lDataSize, fp);
-    fclose(fp);
-    free(image_data);
-
-    if (written != (size_t)img_info.lDataSize) {
-        fprintf(stderr, "fm_download_last: Incomplete write (%zu/%ld bytes)\n", written, img_info.lDataSize);
-        return -9;
-    }
-
-    // Delete image from camera buffer
-    XSDK_DeleteImage(g_hCamera);
-
-    printf("Downloaded image: %s (%ld bytes)\n", filepath, img_info.lDataSize);
+    printf("fm_download_last: Successfully downloaded %ld image(s)\n", shoot_frames);
     return 0;
 }
 
