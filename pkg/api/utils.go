@@ -21,41 +21,86 @@ func abs(x int) int {
 }
 
 // Standard photographic shutter speeds (in microseconds) as shown on Fuji cameras
+// Includes all T-mode values for astrophotography long exposures
 var standardShutterSpeeds = []struct {
 	microseconds int
 	display      string
 }{
-	{125, "1/8000"},       // 1/8000 second (125 µs)
-	{250, "1/4000"},       // 1/4000 second (250 µs)
-	{500, "1/2000"},       // 1/2000 second (500 µs)
-	{1000, "1/1000"},      // 1/1000 second (1000 µs)
-	{2000, "1/500"},       // 1/500 second (2000 µs)
-	{4000, "1/250"},       // 1/250 second (4000 µs)
-	{8000, "1/125"},       // 1/125 second (8000 µs)
-	{16667, "1/60"},       // 1/60 second (16667 µs)
-	{33333, "1/30"},       // 1/30 second (33333 µs)
-	{66667, "1/15"},       // 1/15 second (66667 µs)
-	{125000, "1/8"},       // 1/8 second (125000 µs)
-	{250000, "1/4"},       // 1/4 second (250000 µs)
-	{500000, "1/2"},       // 1/2 second (500000 µs)
-	{1000000, "1"},        // 1 second (1000000 µs)
-	{2000000, "2"},        // 2 seconds (2000000 µs)
-	{4000000, "4"},        // 4 seconds (4000000 µs)
-	{8000000, "8"},        // 8 seconds (8000000 µs)
-	{15000000, "15"},      // 15 seconds (15000000 µs)
-	{30000000, "30"},      // 30 seconds (30000000 µs)
-	{60000000, "60"},      // 60 seconds (60000000 µs)
+	// Fast shutter speeds (fractions)
+	{125, "1/8000"},       // 1/8000 second
+	{250, "1/4000"},       // 1/4000 second
+	{500, "1/2000"},       // 1/2000 second
+	{1000, "1/1000"},      // 1/1000 second
+	{2000, "1/500"},       // 1/500 second
+	{4000, "1/250"},       // 1/250 second
+	{8000, "1/125"},       // 1/125 second
+	{16667, "1/60"},       // 1/60 second
+	{33333, "1/30"},       // 1/30 second
+	{66667, "1/15"},       // 1/15 second
+	{125000, "1/8"},       // 1/8 second
+	{250000, "1/4"},       // 1/4 second
+	{500000, "1/2"},       // 1/2 second
+	// T-mode shutter speeds (whole seconds and fractions)
+	{1000000, "1"},        // 1 second
+	{1300000, "1.3"},      // 1.3 seconds
+	{1500000, "1.5"},      // 1.5 seconds
+	{2000000, "2"},        // 2 seconds
+	{2500000, "2.5"},      // 2.5 seconds
+	{3000000, "3"},        // 3 seconds
+	{4000000, "4"},        // 4 seconds
+	{5000000, "5"},        // 5 seconds
+	{6500000, "6.5"},      // 6.5 seconds
+	{8000000, "8"},        // 8 seconds
+	{10000000, "10"},      // 10 seconds
+	{13000000, "13"},      // 13 seconds
+	{15000000, "15"},      // 15 seconds (SDK: 16000000)
+	{16000000, "15"},      // 15 seconds (actual SDK value)
+	{20000000, "20"},      // 20 seconds
+	{25000000, "25"},      // 25 seconds
+	{30000000, "30"},      // 30 seconds (SDK: 32000000)
+	{32000000, "30"},      // 30 seconds (actual SDK value)
+	{40000000, "40"},      // 40 seconds
+	{50000000, "50"},      // 50 seconds
+	{60000000, "60"},      // 1 minute
 }
 
-// getPhotographicFraction converts microseconds to a photographic fraction string
+// Extended T-mode shutter speeds (specially encoded SDK values, NOT microseconds)
+// These values are natively supported by the camera for long exposures > 1 minute
+// The encoding follows a special SDK format: 64000xxx where xxx indicates the duration
+var extendedTModeShutterSpeeds = []struct {
+	sdkValue int    // Raw SDK value (NOT microseconds)
+	display  string // Human-readable display
+	seconds  int    // Duration in seconds (for reference)
+}{
+	{64000000, "1m", 60},    // 1 minute
+	{64000030, "2m", 120},   // 2 minutes
+	{64000060, "4m", 240},   // 4 minutes
+	{64000090, "8m", 480},   // 8 minutes
+	{64000120, "15m", 900},  // 15 minutes
+}
+
+// getPhotographicFraction converts microseconds/SDK values to a photographic fraction string
 // Maps to standard Fuji camera shutter speeds instead of mathematical rounding
-func getPhotographicFraction(microseconds int) string {
+// Also handles extended T-mode values (64000xxx encoded format)
+func getPhotographicFraction(value int) string {
+	// First, check if this is an extended T-mode value (64000xxx format)
+	if value >= 64000000 && value < 65000000 {
+		for _, speed := range extendedTModeShutterSpeeds {
+			if speed.sdkValue == value {
+				return speed.display
+			}
+		}
+		// Unknown extended T-mode value, return raw
+		return fmt.Sprintf("%d (extended)", value)
+	}
+
+	// Standard shutter speed (microseconds)
 	// Find the closest standard shutter speed
 	closest := standardShutterSpeeds[0]
-	minDiff := abs(microseconds - closest.microseconds)
+	minDiff := abs(value - closest.microseconds)
 
 	for _, speed := range standardShutterSpeeds[1:] {
-		diff := abs(microseconds - speed.microseconds)
+		diff := abs(value - speed.microseconds)
 		if diff < minDiff {
 			closest = speed
 			minDiff = diff
@@ -71,9 +116,34 @@ func ShutterSpeedToMicroseconds(shutterSpeed string) (int, error) {
 	return parseShutterSpeed(shutterSpeed)
 }
 
-// parseShutterSpeed parses a shutter speed string to microseconds
-// This delegates to parseShutterDuration for consistency with main package logic
+// parseShutterSpeed parses a shutter speed string to the appropriate SDK value
+// For standard speeds, returns microseconds. For extended T-mode, returns SDK encoded values.
+// Supported formats:
+// - "1/250", "1/60" (fractions)
+// - "1", "2", "30" (seconds)
+// - "1m", "2m", "4m", "8m", "15m" (extended T-mode minutes)
 func parseShutterSpeed(input string) (int, error) {
+	// First, check for extended T-mode format (e.g., "2m", "4m", "8m", "15m")
+	if strings.HasSuffix(input, "m") && !strings.Contains(input, "/") {
+		// Extract the number before 'm'
+		minuteStr := strings.TrimSuffix(input, "m")
+		minutes, err := strconv.Atoi(minuteStr)
+		if err != nil {
+			return 0, fmt.Errorf("invalid minute format: %s", input)
+		}
+
+		// Map to extended T-mode SDK values
+		for _, speed := range extendedTModeShutterSpeeds {
+			if speed.seconds == minutes*60 {
+				return speed.sdkValue, nil
+			}
+		}
+
+		// Not a known extended T-mode value
+		return 0, fmt.Errorf("unsupported extended T-mode duration: %s (supported: 1m, 2m, 4m, 8m, 15m)", input)
+	}
+
+	// Standard shutter speed - convert to microseconds
 	seconds, err := parseShutterDuration(input)
 	if err != nil {
 		return 0, err
@@ -86,6 +156,7 @@ func parseShutterSpeed(input string) (int, error) {
 // - "0.5s" or "0.5" (decimal seconds)
 // - "1/30s" or "1/30" (photographic fractions)
 // - "1/4s" or "1/4" (fractional seconds)
+// NOTE: Does NOT handle extended T-mode ("2m", "4m", etc.) - use parseShutterSpeed instead
 func parseShutterDuration(s string) (float64, error) {
 	// Handle optional 's' suffix
 	if strings.HasSuffix(s, "s") {

@@ -374,6 +374,24 @@ func (r *RealCamera) Capture() error {
 	return r.sdkCamera.Capture()
 }
 
+// CaptureBulb performs a BULB mode capture with a timed exposure
+// durationSeconds: exposure duration in seconds (e.g., 90 for 1.5 minutes, 300 for 5 minutes)
+// Maximum duration is 30 minutes (1800 seconds)
+func (r *RealCamera) CaptureBulb(durationSeconds int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	if r.sdkCamera == nil {
+		return fmt.Errorf("SDK camera not initialized")
+	}
+
+	return r.sdkCamera.CaptureBulb(durationSeconds)
+}
+
 // DownloadLast downloads the last captured image
 func (r *RealCamera) DownloadLast(outputDir, filename string) error {
 	r.mu.Lock()

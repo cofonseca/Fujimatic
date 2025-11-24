@@ -763,6 +763,17 @@ func (s *Server) handleCaptureSingle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse optional request body for BULB duration
+	var req CaptureSingleRequest
+	// parseJSON returns error if body is empty/invalid, but we want to allow empty body
+	// for backwards compatibility (normal capture with no BULB)
+	if r.ContentLength > 0 {
+		if err := s.parseJSON(r, &req); err != nil {
+			// Log but don't fail - use default (normal capture)
+			logger.Info("Capture: no JSON body or invalid JSON, using normal capture")
+		}
+	}
+
 	camera := s.state.GetCamera()
 
 	if !camera.IsConnected() {
@@ -790,15 +801,28 @@ func (s *Server) handleCaptureSingle(w http.ResponseWriter, r *http.Request) {
 	var outputDir string
 	var filePath string
 
+	// Determine if this is a BULB capture
+	isBulb := req.BulbDuration > 0
+	if isBulb {
+		logger.Info("Capture: BULB mode, duration=%d seconds (%.1f minutes)", req.BulbDuration, float64(req.BulbDuration)/60.0)
+	}
+
 	if sess != nil {
 		// Session exists - use session-based capture
 		logger.Info("Capture: using active session (project=%s, output_dir=%s)", sess.ProjectName, sess.OutputDir)
 		filename = sess.GetNextFilename()
 
-		// Capture and download
-		if err := sess.Capture(); err != nil {
-			s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Capture failed: %v", err))
-			return
+		// Capture and download (BULB or normal)
+		if isBulb {
+			if err := sess.CaptureBulb(req.BulbDuration); err != nil {
+				s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("BULB capture failed: %v", err))
+				return
+			}
+		} else {
+			if err := sess.Capture(); err != nil {
+				s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Capture failed: %v", err))
+				return
+			}
 		}
 
 		filePath = filepath.Join(sess.OutputDir, filename)
@@ -816,10 +840,17 @@ func (s *Server) handleCaptureSingle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Trigger camera capture
-		if err := camera.Capture(); err != nil {
-			s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Capture failed: %v", err))
-			return
+		// Trigger camera capture (BULB or normal)
+		if isBulb {
+			if err := camera.CaptureBulb(req.BulbDuration); err != nil {
+				s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("BULB capture failed: %v", err))
+				return
+			}
+		} else {
+			if err := camera.Capture(); err != nil {
+				s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Capture failed: %v", err))
+				return
+			}
 		}
 
 		// Download the captured image

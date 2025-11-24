@@ -479,6 +479,30 @@ func (c *Camera) Capture() error {
 	return fmt.Errorf("capture failed with code: %d", result)
 }
 
+// CaptureBulb performs a BULB mode capture with a timed exposure
+// durationSeconds: exposure duration in seconds (e.g., 90 for 1.5 minutes, 300 for 5 minutes)
+// Maximum duration is 30 minutes (1800 seconds) for safety
+// This is used for long exposures in astrophotography that exceed the camera's normal T-mode range
+func (c *Camera) CaptureBulb(durationSeconds int) error {
+	if !c.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	if durationSeconds <= 0 {
+		return fmt.Errorf("BULB duration must be positive")
+	}
+
+	if durationSeconds > 1800 {
+		return fmt.Errorf("BULB duration too long (max 30 minutes = 1800 seconds)")
+	}
+
+	result := C.fm_capture_bulb(C.int(durationSeconds))
+	if result == 0 {
+		return nil
+	}
+	return fmt.Errorf("BULB capture failed with code: %d", result)
+}
+
 // DownloadLast downloads the last captured image
 func (c *Camera) DownloadLast(outputDir, filename string) error {
 	if !c.connected {

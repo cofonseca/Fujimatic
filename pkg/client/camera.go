@@ -223,6 +223,15 @@ func (c *RemoteCamera) Capture() error {
 	return c.post("/api/capture/single", nil, &resp)
 }
 
+// CaptureBulb performs a BULB mode capture with a timed exposure
+func (c *RemoteCamera) CaptureBulb(durationSeconds int) error {
+	req := api.CaptureSingleRequest{
+		BulbDuration: durationSeconds,
+	}
+	var resp api.CaptureSingleResponse
+	return c.post("/api/capture/single", req, &resp)
+}
+
 // DownloadLast downloads the last captured image
 // Note: This is handled server-side for RemoteCamera
 // The file remains on the server until explicitly downloaded via G-3

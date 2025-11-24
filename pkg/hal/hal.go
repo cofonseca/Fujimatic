@@ -71,6 +71,12 @@ type Camera interface {
 	// Capture triggers a photo capture
 	Capture() error
 
+	// CaptureBulb performs a BULB mode capture with a timed exposure
+	// durationSeconds: exposure duration in seconds (e.g., 90 for 1.5 minutes, 300 for 5 minutes)
+	// Maximum duration is 30 minutes (1800 seconds)
+	// Used for long exposures in astrophotography that exceed normal T-mode range
+	CaptureBulb(durationSeconds int) error
+
 	// DownloadLast downloads the last captured image to the specified location
 	DownloadLast(outputDir, filename string) error
 

@@ -131,6 +131,58 @@ func (s *Session) Capture() error {
 	return nil
 }
 
+// CaptureBulb performs a BULB mode capture with a timed exposure
+// durationSeconds: exposure duration in seconds (e.g., 90 for 1.5 minutes, 300 for 5 minutes)
+// This is used for long exposures in astrophotography that exceed normal T-mode range
+func (s *Session) CaptureBulb(durationSeconds int) error {
+	if !s.camera.IsConnected() {
+		return fmt.Errorf("camera not connected")
+	}
+
+	// Ensure output directory exists
+	if err := os.MkdirAll(s.OutputDir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
+	}
+
+	// Check for file collision and skip to next available sequence number
+	basePath := filepath.Join(s.OutputDir, s.GetNextFilename())
+	for fileExists(basePath+".RAF") || fileExists(basePath+".JPG") {
+		s.SequenceNumber++
+		basePath = filepath.Join(s.OutputDir, s.GetNextFilename())
+	}
+
+	baseFilename := s.GetNextFilename()
+
+	// Trigger BULB capture
+	if err := s.camera.CaptureBulb(durationSeconds); err != nil {
+		return fmt.Errorf("BULB capture failed: %w", err)
+	}
+
+	// Download the captured image(s)
+	if err := s.camera.DownloadLast(s.OutputDir, baseFilename); err != nil {
+		return fmt.Errorf("download failed: %w", err)
+	}
+
+	// Track latest capture for preview
+	jpgPath := basePath + ".JPG"
+	rafPath := basePath + ".RAF"
+	if fileExists(jpgPath) {
+		s.LatestCapturePath = jpgPath
+	} else {
+		s.LatestCapturePath = rafPath
+	}
+
+	// Convert RAF in background if enabled
+	if s.ConvertFormat != "none" && fileExists(rafPath) {
+		go s.convertAndCleanup(rafPath)
+	}
+
+	// Increment sequence for next capture
+	s.SequenceNumber++
+
+	return nil
+}
+
 // Save persists the session state to a JSON file in the user config directory
 func (s *Session) Save() error {
 	configDir, err := getConfigDir()

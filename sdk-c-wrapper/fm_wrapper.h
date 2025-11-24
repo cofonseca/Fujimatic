@@ -19,6 +19,7 @@ int fm_set_iso(int iso);
 int fm_get_image_quality(int* quality);
 int fm_set_image_quality(int quality);
 int fm_capture();
+int fm_capture_bulb(int duration_seconds);  // BULB mode capture with timed exposure
 int fm_download_last(const char* outdir, const char* filename);
 int fm_get_supported_shutter_count(int* count);
 int fm_get_supported_shutter_speeds(int* count, int* speeds);

@@ -126,6 +126,10 @@ type BrowseDirectoryResponse struct {
 
 // Capture
 
+type CaptureSingleRequest struct {
+	BulbDuration int `json:"bulb_duration"` // BULB exposure duration in seconds (0 for normal capture)
+}
+
 type CaptureSingleResponse struct {
 	Filename   string `json:"filename"`
 	Size       int64  `json:"size"`

@@ -22,6 +22,33 @@ static XSDK_HANDLE g_hCamera = NULL;
 static int verbose_logging = 0;
 static int g_liveview_active = 0; // Track live view state (X-T3 doesn't have GetLiveViewStatus)
 
+// Helper to convert SDK shutter speed value to actual exposure time in milliseconds
+// Handles both standard microsecond values and extended T-mode encoded values (64000xxx)
+static int shutter_value_to_exposure_ms(long sdk_value) {
+    // Extended T-mode values start at 64000000 and use special encoding
+    // These are NOT microseconds - they're specially encoded durations
+    if (sdk_value >= 64000000 && sdk_value < 65000000) {
+        // Decode extended T-mode values
+        switch (sdk_value) {
+            case 64000000: return 60 * 1000;     // 1 minute = 60,000 ms
+            case 64000030: return 120 * 1000;   // 2 minutes = 120,000 ms
+            case 64000060: return 240 * 1000;   // 4 minutes = 240,000 ms
+            case 64000090: return 480 * 1000;   // 8 minutes = 480,000 ms
+            case 64000120: return 900 * 1000;   // 15 minutes = 900,000 ms
+            case 64000150: return 1800 * 1000;  // 30 minutes = 1,800,000 ms
+            default:
+                // Unknown extended T-mode value - estimate based on pattern
+                // Each +30 in encoding roughly doubles the time
+                printf("Warning: Unknown extended T-mode value %ld, estimating exposure time\n", sdk_value);
+                int offset = (int)(sdk_value - 64000000);
+                return (60 + offset * 4) * 1000; // Rough estimate
+        }
+    }
+
+    // Standard microsecond value - convert to milliseconds
+    return (int)(sdk_value / 1000);
+}
+
 // Battery level conversion helper
 static int convert_battery_to_percent(long battery_code) {
     switch (battery_code) {
@@ -598,6 +625,57 @@ int fm_capture() {
         return -1;
     }
 
+    // Query current shutter speed to calculate appropriate timeout for long exposures
+    // This is critical for astrophotography where exposures can be 15s, 30s, 1m, 2m, 4m or longer
+    long current_shutter_us = 0;
+    long bulb_mode = 0;
+    long shutter_result = XSDK_GetShutterSpeed(g_hCamera, &current_shutter_us, &bulb_mode);
+
+    if (shutter_result != 0) {
+        printf("fm_capture: Warning - could not query shutter speed (error %ld), using default timeout\n", shutter_result);
+        current_shutter_us = 1000000; // Default to 1 second if we can't read it
+    } else {
+        // Always log the detected shutter speed for debugging long exposure issues
+        printf("fm_capture: Detected shutter speed: %ld microseconds (%.2f seconds), bulb=%ld\n",
+               current_shutter_us, (double)current_shutter_us / 1000000.0, bulb_mode);
+    }
+
+    // Calculate dynamic timeout: exposure time + buffer for image processing
+    // RAW files (~50MB) need time to write to buffer after exposure completes
+    // Buffer time accounts for: sensor readout, image processing, buffer write
+    // Use helper function to properly decode extended T-mode values (64000xxx)
+    int exposure_time_ms = shutter_value_to_exposure_ms(current_shutter_us);
+    int buffer_time_ms = 30000; // 30 seconds for image processing/transfer (increased for long exposures)
+    int total_timeout_ms = exposure_time_ms + buffer_time_ms;
+
+    printf("fm_capture: Timeout calculation: exposure=%dms (%.1fs) + buffer=%dms = %dms total\n",
+           exposure_time_ms, exposure_time_ms / 1000.0, buffer_time_ms, total_timeout_ms);
+
+    // Ensure minimum timeout of 10 seconds for short exposures
+    if (total_timeout_ms < 10000) {
+        total_timeout_ms = 10000;
+        printf("fm_capture: Applied minimum timeout of 10 seconds\n");
+    }
+
+    // Cap maximum timeout at 20 minutes (for 15-minute T-mode exposures)
+    if (total_timeout_ms > 1200000) {
+        total_timeout_ms = 1200000;
+        printf("fm_capture: Applied maximum timeout of 20 minutes\n");
+    }
+
+    double exposure_seconds = exposure_time_ms / 1000.0;
+
+    // Log exposure info for long exposures (>= 1 second)
+    if (exposure_time_ms >= 1000) {
+        if (exposure_seconds >= 60.0) {
+            printf("Long exposure: %.1f minutes (timeout: %d seconds)\n",
+                   exposure_seconds / 60.0, total_timeout_ms / 1000);
+        } else {
+            printf("Long exposure: %.1f seconds (timeout: %d seconds)\n",
+                   exposure_seconds, total_timeout_ms / 1000);
+        }
+    }
+
     // Trigger capture using XSDK_Release
     // Use XSDK_RELEASE_SHOOT_S1OFF mode - complete shutter sequence in one call
     // From SDK manual: "Shutter button pressed all the way down and then released"
@@ -687,34 +765,239 @@ int fm_capture() {
 
     // Wait for image to appear in buffer
     // SDK manual: "poll the camera buffer by XSDK_GetBufferCapacity() or XSDK_ReadImageInfo()"
+    // CRITICAL: For long exposures, we must wait for the full exposure time plus processing time
     long shoot_frames = 0;
     long total_frames = 0;
+    int poll_interval_ms = 500; // Poll every 500ms for long exposures
+    int max_attempts = total_timeout_ms / poll_interval_ms;
     int attempts = 0;
+    int last_progress_second = -1;
 
-    if (verbose_logging) {
+    if (verbose_logging || current_shutter_us >= 1000000) {
         printf("Waiting for image to be written to camera buffer...\n");
     }
-    while (attempts < 100) {  // Max 10 seconds
+
+    while (attempts < max_attempts) {
         XSDK_GetBufferCapacity(g_hCamera, &shoot_frames, &total_frames);
         if (shoot_frames > 0) {
-            if (verbose_logging) {
-                printf("Image available in buffer after %d ms (%ld frames)\n", attempts * 100, shoot_frames);
+            int elapsed_ms = attempts * poll_interval_ms;
+            if (verbose_logging || current_shutter_us >= 1000000) {
+                printf("Image available in buffer after %.1f seconds (%ld frames)\n",
+                       elapsed_ms / 1000.0, shoot_frames);
             }
             break;  // Image is ready
         }
+
+        // Progress indication for long exposures (print every 5 seconds)
+        if (current_shutter_us >= 5000000) { // 5+ second exposures
+            int elapsed_seconds = (attempts * poll_interval_ms) / 1000;
+            if (elapsed_seconds > 0 && elapsed_seconds % 5 == 0 && elapsed_seconds != last_progress_second) {
+                last_progress_second = elapsed_seconds;
+                int remaining_exposure_s = (int)(exposure_seconds - elapsed_seconds);
+                if (remaining_exposure_s > 0) {
+                    printf("  Exposing... %d seconds remaining\n", remaining_exposure_s);
+                } else {
+                    printf("  Processing image...\n");
+                }
+            }
+        }
+
 #ifdef _WIN32
-        Sleep(100);  // 100ms
+        Sleep(poll_interval_ms);
 #else
-        usleep(100000);
+        usleep(poll_interval_ms * 1000);
 #endif
         attempts++;
     }
 
-    if (attempts >= 100) {
-        fprintf(stderr, "fm_capture: Warning - timeout waiting for image in buffer\n");
+    if (attempts >= max_attempts) {
+        fprintf(stderr, "fm_capture: Timeout waiting for image in buffer after %d seconds\n",
+                total_timeout_ms / 1000);
+        fprintf(stderr, "  This may indicate: camera locked up, exposure interrupted, or buffer issue\n");
+        fprintf(stderr, "  Try disconnecting and reconnecting the camera\n");
         return -3;
     }
 
+    return 0;
+}
+
+// BULB mode capture with timed exposure
+// duration_seconds: exposure duration in seconds (e.g., 90 for 1.5 minutes, 300 for 5 minutes)
+// Returns: 0 on success, negative on error
+//
+// IMPORTANT: Per SDK documentation, BULB requires proper half-press sequence:
+// "To operate full-press shutter button, half-shutter control prior to the full-press shutter is required."
+// "XSDK_RELEASE_BULBS2_ON - Shutter button pressed full-halfway from the state of pressing halfway to start BULB"
+//
+// Correct sequence:
+// 1. S1ON (0x0200) - Press shutter halfway first
+// 2. BULBS2_ON (0x0500) - Start BULB from halfway state
+// 3. Wait for exposure duration
+// 4. BULBS1OFF (0x0008) - End BULB exposure
+int fm_capture_bulb(int duration_seconds) {
+    if (g_hCamera == NULL) {
+        fprintf(stderr, "fm_capture_bulb: Camera not connected\n");
+        return -1;
+    }
+
+    if (duration_seconds <= 0) {
+        fprintf(stderr, "fm_capture_bulb: Invalid duration (must be positive)\n");
+        return -2;
+    }
+
+    // Safety limit: max 30 minutes (1800 seconds)
+    if (duration_seconds > 1800) {
+        fprintf(stderr, "fm_capture_bulb: Duration too long (max 30 minutes = 1800 seconds)\n");
+        return -2;
+    }
+
+    printf("fm_capture_bulb: Starting BULB capture for %d seconds (%.1f minutes)\n",
+           duration_seconds, (double)duration_seconds / 60.0);
+
+    // Check BULB capability (informational only)
+    long num_speeds = 0;
+    long bulb_capable = 0;
+    long cap_result = XSDK_CapShutterSpeed(g_hCamera, &num_speeds, NULL, &bulb_capable);
+    if (cap_result == 0) {
+        printf("fm_capture_bulb: Camera reports %ld shutter speeds, BULB capable = %ld\n",
+               num_speeds, bulb_capable);
+    }
+
+    // Release mode constants (from XAPI.H)
+    // XSDK_RELEASE_S1ON = 0x0200 - Press shutter halfway
+    // XSDK_RELEASE_BULBS2_ON = 0x0500 - Start BULB from S1 state
+    // XSDK_RELEASE_N_BULBS1OFF = 0x000C - End BULB and release S1 (= N_BULBS2OFF | N_S1OFF)
+    // XSDK_RELEASE_N_S1OFF = 0x0004 - Release from halfway state
+    // Note: These are already defined in XAPI.H, so we don't redefine them
+
+    long shot_opt = 0;
+    long af_status = 0;
+    long result = 0;
+
+    // ========== STEP 1: Press shutter halfway (S1ON) ==========
+    // This is REQUIRED before BULB can start - SDK docs say:
+    // "half-shutter control prior to the full-press shutter is required"
+    printf("fm_capture_bulb: Step 1 - Pressing shutter halfway (S1ON 0x0200)...\n");
+    result = XSDK_Release(g_hCamera, XSDK_RELEASE_S1ON, &shot_opt, &af_status);
+
+    if (result != 0) {
+        long api_code = 0;
+        long err_code = 0;
+        XSDK_GetErrorNumber(g_hCamera, &api_code, &err_code);
+        fprintf(stderr, "fm_capture_bulb: S1ON failed\n");
+        fprintf(stderr, "  Return code: %ld\n", result);
+        fprintf(stderr, "  API code: %ld (0x%04lX)\n", api_code, api_code);
+        fprintf(stderr, "  Error code: %ld (0x%04lX)\n", err_code, err_code);
+        return -3;
+    }
+    printf("fm_capture_bulb: S1ON successful (AF status: %ld)\n", af_status);
+
+    // Small delay to let camera process half-press
+#ifdef _WIN32
+    Sleep(200);
+#else
+    usleep(200000);
+#endif
+
+    // ========== STEP 2: Start BULB from half-press state ==========
+    // Per SDK docs: "BULBS2_ON - from the state of pressing halfway to start BULB"
+    printf("fm_capture_bulb: Step 2 - Starting BULB (BULBS2_ON 0x0500)...\n");
+    result = XSDK_Release(g_hCamera, XSDK_RELEASE_BULBS2_ON, &shot_opt, &af_status);
+
+    if (result != 0) {
+        long api_code = 0;
+        long err_code = 0;
+        XSDK_GetErrorNumber(g_hCamera, &api_code, &err_code);
+        fprintf(stderr, "fm_capture_bulb: BULBS2_ON failed\n");
+        fprintf(stderr, "  Return code: %ld\n", result);
+        fprintf(stderr, "  API code: %ld (0x%04lX)\n", api_code, api_code);
+        fprintf(stderr, "  Error code: %ld (0x%04lX)\n", err_code, err_code);
+
+        // Release S1 before returning
+        printf("fm_capture_bulb: Releasing S1 before exit...\n");
+        XSDK_Release(g_hCamera, XSDK_RELEASE_N_S1OFF, &shot_opt, &af_status);
+        return -4;
+    }
+
+    printf("fm_capture_bulb: Shutter opened, exposing for %d seconds...\n", duration_seconds);
+
+    // Step 3: Wait for the exposure duration with progress updates
+    int elapsed = 0;
+    int last_report = -5; // Start 5 seconds before first report so we report at 0
+    while (elapsed < duration_seconds) {
+        // Report progress every 10 seconds
+        if (elapsed - last_report >= 10) {
+            int remaining = duration_seconds - elapsed;
+            if (remaining >= 60) {
+                printf("  Exposing... %d:%02d remaining\n", remaining / 60, remaining % 60);
+            } else {
+                printf("  Exposing... %d seconds remaining\n", remaining);
+            }
+            last_report = elapsed;
+        }
+
+        // Sleep in 1-second increments to allow progress reporting
+#ifdef _WIN32
+        Sleep(1000);
+#else
+        sleep(1);
+#endif
+        elapsed++;
+    }
+
+    // ========== STEP 4: Stop BULB exposure ==========
+    // Per SDK docs: "XSDK_RELEASE_N_BULBS1OFF - BULB photography ended"
+    // Note: XSDK_RELEASE_N_BULBS1OFF = 0x0008 (same as XSDK_RELEASE_N_BULBOFF)
+    printf("fm_capture_bulb: Step 4 - Closing shutter (BULBS1OFF 0x0008)...\n");
+    result = XSDK_Release(g_hCamera, XSDK_RELEASE_N_BULBS1OFF, &shot_opt, &af_status);
+    if (result != 0) {
+        long api_code = 0;
+        long err_code = 0;
+        XSDK_GetErrorNumber(g_hCamera, &api_code, &err_code);
+        fprintf(stderr, "fm_capture_bulb: Failed to stop BULB exposure\n");
+        fprintf(stderr, "  Return code: %ld\n", result);
+        fprintf(stderr, "  API code: %ld (0x%04lX)\n", api_code, api_code);
+        fprintf(stderr, "  Error code: %ld (0x%04lX)\n", err_code, err_code);
+        // Continue anyway - we need to wait for the image
+    }
+
+    // Step 5: Wait for image to appear in buffer
+    // Calculate timeout: exposure is done, but image processing takes time
+    // Allow 30 seconds for image processing (RAW files are ~50MB)
+    int buffer_timeout_ms = 30000;
+    int poll_interval_ms = 500;
+    int max_attempts = buffer_timeout_ms / poll_interval_ms;
+    int attempts = 0;
+
+    printf("fm_capture_bulb: Waiting for image to be written to buffer...\n");
+
+    long shoot_frames = 0;
+    long total_frames = 0;
+
+    while (attempts < max_attempts) {
+        XSDK_GetBufferCapacity(g_hCamera, &shoot_frames, &total_frames);
+        if (shoot_frames > 0) {
+            printf("fm_capture_bulb: Image available in buffer after %d seconds processing\n",
+                   (attempts * poll_interval_ms) / 1000);
+            break;
+        }
+
+#ifdef _WIN32
+        Sleep(poll_interval_ms);
+#else
+        usleep(poll_interval_ms * 1000);
+#endif
+        attempts++;
+    }
+
+    if (attempts >= max_attempts) {
+        fprintf(stderr, "fm_capture_bulb: Timeout waiting for image in buffer after %d seconds\n",
+                buffer_timeout_ms / 1000);
+        fprintf(stderr, "  The exposure may have failed or the camera may be in an error state\n");
+        return -5;
+    }
+
+    printf("fm_capture_bulb: BULB capture completed successfully\n");
     return 0;
 }
 

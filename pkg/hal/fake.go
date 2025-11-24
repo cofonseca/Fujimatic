@@ -394,6 +394,43 @@ func (f *FakeCamera) Capture() error {
 	return nil
 }
 
+// CaptureBulb performs a BULB mode capture with a timed exposure (fake implementation)
+// For fake camera, we just simulate a brief delay rather than the full exposure time
+func (f *FakeCamera) CaptureBulb(durationSeconds int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.connected {
+		return fmt.Errorf("camera not connected")
+	}
+
+	if durationSeconds <= 0 {
+		return fmt.Errorf("BULB duration must be positive")
+	}
+
+	if durationSeconds > 1800 {
+		return fmt.Errorf("BULB duration too long (max 30 minutes = 1800 seconds)")
+	}
+
+	// Simulate a brief capture delay (not the full exposure time for testing)
+	fmt.Printf("Fake camera: BULB capture for %d seconds (simulated)\n", durationSeconds)
+	time.Sleep(200 * time.Millisecond)
+
+	f.captureCount++
+
+	// Simulate battery drain (more for longer exposures)
+	drainPercent := durationSeconds / 60 // 1% per minute
+	if drainPercent < 1 {
+		drainPercent = 1
+	}
+	f.batteryLevel -= drainPercent
+	if f.batteryLevel < 0 {
+		f.batteryLevel = 0
+	}
+
+	return nil
+}
+
 // DownloadLast downloads the last captured image
 func (f *FakeCamera) DownloadLast(outputDir, filename string) error {
 	f.mu.Lock()
