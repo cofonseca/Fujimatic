@@ -348,25 +348,18 @@
 
         <div id="error" class="error-message"></div>
 
-        <!-- Camera Connection Panel -->
-        <div style="background: #2a2a2a; border: 2px solid #444; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; gap: 20px; flex-wrap: wrap;">
-                <div style="flex: 1; min-width: 200px;">
-                    <h2 style="margin: 0 0 15px 0; font-size: 1.3rem;">📡 Camera Status</h2>
-                    <div style="display: grid; grid-template-columns: auto 1fr; gap: 8px 15px; font-size: 0.95rem;">
-                        <strong>Connection:</strong>
-                        <span id="connectionStatus" style="color: #ff6b6b;">Disconnected</span>
-
-                        <strong>Model:</strong>
-                        <span id="cameraModel" style="color: #888;">—</span>
-
-                        <strong>Battery:</strong>
-                        <span id="batteryLevel" style="color: #888;">—</span>
-                    </div>
-                </div>
-                <div style="display: flex; flex-direction: column; gap: 10px;">
-                    <button id="connectBtn" onclick="connectCamera()" style="background: #4CAF50; min-width: 180px;">🔌 Connect Camera</button>
-                    <button id="disconnectBtn" onclick="disconnectCamera()" class="secondary" style="min-width: 180px; display: none;">🔌 Disconnect Camera</button>
+        <!-- Camera Connection Panel - Compact single row -->
+        <div style="background: #2a2a2a; border: 2px solid #444; border-radius: 8px; padding: 12px 20px; margin-bottom: 20px;">
+            <div style="display: flex; align-items: center; gap: 20px; flex-wrap: wrap;">
+                <span style="font-size: 1.1rem; font-weight: 600;">📡</span>
+                <span id="connectionStatus" style="color: #ff6b6b; font-weight: 500;">Disconnected</span>
+                <span style="color: #555;">|</span>
+                <span style="color: #888; font-size: 0.9rem;">Model: <span id="cameraModel">—</span></span>
+                <span style="color: #555;">|</span>
+                <span style="color: #888; font-size: 0.9rem;">Battery: <span id="batteryLevel">—</span></span>
+                <div style="margin-left: auto;">
+                    <button id="connectBtn" onclick="connectCamera()" style="background: #4CAF50; padding: 8px 16px;">🔌 Connect</button>
+                    <button id="disconnectBtn" onclick="disconnectCamera()" class="secondary" style="padding: 8px 16px; display: none;">🔌 Disconnect</button>
                 </div>
             </div>
         </div>
@@ -483,27 +476,33 @@
         <h2>💾 Intervalometer</h2>
 
         <div class="camera-controls">
-            <!-- Compact intervalometer row: Directory, Frames, Delay, Start/Stop -->
+            <!-- Compact intervalometer row: Target, Directory, Frames, Delay, Start/Stop -->
             <div class="control-row" style="flex-wrap: wrap; gap: 10px; align-items: flex-end;">
-                <div class="control-group" style="flex: 1; min-width: 180px;">
+                <div class="control-group" style="flex: 0 0 auto; min-width: 140px;">
+                    <label for="targetName">Target Name</label>
+                    <input type="text" id="targetName" placeholder="e.g., Orion Nebula" oninput="validateStartButton()"
+                           style="width: 140px; padding: 10px; background: #333; color: #fff; border: 1px solid #444; border-radius: 4px; font-size: 14px;">
+                </div>
+
+                <div class="control-group" style="flex: 1; min-width: 150px;">
                     <label for="sessionDir">Directory</label>
                     <div style="display: flex; gap: 5px;">
-                        <input type="text" id="sessionDir" placeholder="./captures" value="./captures" oninput="validateStartButton()" onchange="autoStartSession()"
+                        <input type="text" id="sessionDir" placeholder="./captures" value="./captures" oninput="validateStartButton()"
                                style="flex: 1; padding: 10px; background: #333; color: #fff; border: 1px solid #444; border-radius: 4px; font-size: 14px;">
                         <button onclick="browseDirectory()" class="secondary" style="padding: 10px 12px; min-width: auto;">📂</button>
                     </div>
                 </div>
 
-                <div class="control-group" style="flex: 0 0 auto; min-width: 80px;">
+                <div class="control-group" style="flex: 0 0 auto; min-width: 70px;">
                     <label for="frameCount">Frames</label>
                     <input type="number" id="frameCount" value="10" min="1" max="10000"
-                           style="width: 80px; padding: 10px; background: #333; color: #fff; border: 1px solid #444; border-radius: 4px; font-size: 14px;">
+                           style="width: 70px; padding: 10px; background: #333; color: #fff; border: 1px solid #444; border-radius: 4px; font-size: 14px;">
                 </div>
 
-                <div class="control-group" style="flex: 0 0 auto; min-width: 80px;">
-                    <label for="frameDelay">Delay (s)</label>
+                <div class="control-group" style="flex: 0 0 auto; min-width: 70px;">
+                    <label for="frameDelay">Delay</label>
                     <input type="number" id="frameDelay" value="5" min="0" max="3600"
-                           style="width: 80px; padding: 10px; background: #333; color: #fff; border: 1px solid #444; border-radius: 4px; font-size: 14px;">
+                           style="width: 70px; padding: 10px; background: #333; color: #fff; border: 1px solid #444; border-radius: 4px; font-size: 14px;">
                 </div>
 
                 <div style="display: flex; align-items: center; gap: 6px; padding-bottom: 2px;">
@@ -534,13 +533,13 @@
                     </label>
                 </div>
 
-                <select id="conversionFormat" onchange="applyConversionSettings()" disabled style="padding: 8px; background: #333; color: #fff; border: 1px solid #444; border-radius: 4px; font-size: 13px;">
+                <select id="conversionFormat" disabled style="padding: 8px; background: #333; color: #fff; border: 1px solid #444; border-radius: 4px; font-size: 13px;">
                     <option value="fits">FITS</option>
                     <option value="tiff">TIFF</option>
                 </select>
 
                 <div style="display: flex; align-items: center; gap: 6px;">
-                    <input type="checkbox" id="deleteRAF" onchange="applyConversionSettings()" disabled
+                    <input type="checkbox" id="deleteRAF" disabled
                            style="width: 16px; height: 16px; cursor: pointer;">
                     <label for="deleteRAF" style="margin: 0; cursor: pointer; font-size: 0.85rem; color: #888;">
                         Delete RAF after
@@ -1129,9 +1128,10 @@
         function validateStartButton() {
             const startBtn = document.getElementById('startIntervalBtn');
             const sessionDir = document.getElementById('sessionDir').value.trim();
+            const targetName = document.getElementById('targetName').value.trim();
 
-            // Enable button only if directory is set
-            startBtn.disabled = (sessionDir === '');
+            // Enable button only if both target name and directory are set
+            startBtn.disabled = (sessionDir === '' || targetName === '');
         }
 
         async function updateCameraStatus() {
@@ -1322,8 +1322,7 @@
             formatSelect.disabled = !enabled;
             deleteRAFCheckbox.disabled = !enabled;
 
-            // Auto-apply when toggling conversion on/off
-            applyConversionSettings();
+            // Note: Settings are applied when intervalometer starts (after session is created)
         }
 
         async function browseDirectory() {
@@ -1411,8 +1410,14 @@
             const startBtn = document.getElementById('startIntervalBtn');
             const stopBtn = document.getElementById('stopIntervalBtn');
             const sessionDir = document.getElementById('sessionDir').value.trim();
+            const targetName = document.getElementById('targetName').value.trim();
 
             // Validate inputs
+            if (!targetName) {
+                showError('Please enter a target name (e.g., "Orion Nebula")');
+                return;
+            }
+
             if (!sessionDir) {
                 showError('Please enter a capture directory');
                 return;
@@ -1446,6 +1451,47 @@
                     await stopLiveView();
                 }
 
+                // Convert target name to project name (lowercase, replace spaces with underscores)
+                const projectName = targetName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+
+                // First, create/start a session with the target name
+                const sessionResponse = await fetch('/api/session/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        project: projectName,
+                        output_dir: sessionDir
+                    })
+                });
+
+                if (!sessionResponse.ok) {
+                    const error = await sessionResponse.json();
+                    throw new Error(error.message || 'Failed to create session');
+                }
+
+                console.log(`Session created: ${projectName} in ${sessionDir}`);
+
+                // Apply conversion settings if enabled (now that session exists)
+                const conversionEnabled = document.getElementById('enableConversion').checked;
+                if (conversionEnabled) {
+                    const format = document.getElementById('conversionFormat').value;
+                    const deleteRAF = document.getElementById('deleteRAF').checked;
+                    try {
+                        await fetch('/api/session/conversion', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                format: format,
+                                delete_raf: deleteRAF
+                            })
+                        });
+                        console.log(`Conversion enabled: ${format}, delete_raf=${deleteRAF}`);
+                    } catch (convErr) {
+                        console.warn('Failed to apply conversion settings:', convErr);
+                    }
+                }
+
+                // Now start the intervalometer
                 const response = await fetch('/api/capture/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1462,7 +1508,7 @@
                 }
 
                 const result = await response.json();
-                showSuccess(`Intervalometer started: ${frameCount} frames, ${frameDelay}s delay${asyncMode ? ' (async)' : ''}`);
+                showSuccess(`Started: ${targetName} - ${frameCount} frames, ${frameDelay}s delay`);
 
                 // Update UI
                 intervalometerActive = true;
